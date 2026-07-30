@@ -52,7 +52,8 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
   String _terminalId = 'POS-01';
 
   bool _isConnectedToDesktop = false;
-  String _connectionStatusText = 'Checking Connection...';
+  bool _isAutoDiscovering = false;
+  String _connectionStatusText = 'Connecting...';
   Timer? _pingTimer;
 
   // Scanner Hardware Focus
@@ -64,10 +65,12 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
   @override
   void initState() {
     super.initState();
-    _loadSettings();
+    _loadSettingsAndAutoConnect();
     // Start periodic background connectivity heartbeat ping every 6 seconds
     _pingTimer = Timer.periodic(const Duration(seconds: 6), (_) {
-      _sendConnectivityPing();
+      if (!_isAutoDiscovering) {
+        _sendConnectivityPing();
+      }
     });
   }
 
@@ -79,7 +82,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     super.dispose();
   }
 
-  Future<void> _loadSettings() async {
+  Future<void> _loadSettingsAndAutoConnect() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
@@ -89,7 +92,13 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
         _terminalName = prefs.getString('android_terminal_name') ?? 'Android HandPOS 1';
         _terminalId = prefs.getString('android_terminal_id') ?? 'POS-${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}';
       });
-      _sendConnectivityPing();
+
+      // Attempt immediate auto-connection
+      bool ok = await _sendConnectivityPing();
+      if (!ok) {
+        // If saved IP fails, automatically discover active Desktop on local WiFi
+        await _autoDiscoverAndConnectDesktop();
+      }
     } catch (_) {}
   }
 
@@ -117,6 +126,85 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     }
   }
 
+  // --- AUTOMATIC SUBNET DISCOVERY ---
+  Future<bool> _autoDiscoverAndConnectDesktop() async {
+    if (_isAutoDiscovering) return false;
+    _isAutoDiscovering = true;
+
+    if (mounted) {
+      setState(() {
+        _connectionStatusText = 'Auto-detecting Desktop Workstation on WiFi...';
+      });
+    }
+
+    try {
+      final List<String> candidateSubnets = [];
+
+      try {
+        final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4, includeLoopback: false);
+        for (var interface in interfaces) {
+          for (var addr in interface.addresses) {
+            if (!addr.isLoopback && (addr.address.startsWith('192.168.') || addr.address.startsWith('10.') || addr.address.startsWith('172.'))) {
+              final parts = addr.address.split('.');
+              candidateSubnets.add('${parts[0]}.${parts[1]}.${parts[2]}');
+            }
+          }
+        }
+      } catch (_) {}
+
+      if (candidateSubnets.isEmpty) {
+        candidateSubnets.add('192.168.1');
+        candidateSubnets.add('192.168.0');
+      }
+
+      for (var subnet in candidateSubnets) {
+        final List<Future<String?>> scanTasks = [];
+        for (int i = 1; i <= 254; i++) {
+          final targetIp = '$subnet.$i';
+          scanTasks.add(_testDesktopAddress(targetIp));
+        }
+
+        final results = await Future.wait(scanTasks);
+        final foundIp = results.firstWhere((ip) => ip != null, orElse: () => null);
+
+        if (foundIp != null) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('android_desktop_ip', foundIp);
+
+          if (mounted) {
+            setState(() {
+              _desktopIp = foundIp;
+              _isAutoDiscovering = false;
+            });
+          }
+          bool ok = await _sendConnectivityPing();
+          _isAutoDiscovering = false;
+          return ok;
+        }
+      }
+    } catch (_) {}
+
+    _isAutoDiscovering = false;
+    if (mounted) {
+      setState(() {
+        _isConnectedToDesktop = false;
+        _connectionStatusText = 'Desktop Not Found — Tap to Setup';
+      });
+    }
+    return false;
+  }
+
+  Future<String?> _testDesktopAddress(String targetIp) async {
+    final url = Uri.parse('http://$targetIp:8080/health');
+    try {
+      final response = await http.get(url).timeout(const Duration(milliseconds: 900));
+      if (response.statusCode == 200 && (response.body.trim() == 'OK' || response.body.contains('ok'))) {
+        return targetIp;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   // --- CONNECTIVITY SYNC & PING ---
   Future<bool> _sendConnectivityPing() async {
     final url = Uri.parse('http://$_desktopIp:8080/ping');
@@ -128,7 +216,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
           'id': _terminalId,
           'name': _terminalName,
         }),
-      ).timeout(const Duration(seconds: 3));
+      ).timeout(const Duration(seconds: 2));
 
       if (response.statusCode == 200) {
         if (mounted) {
@@ -141,7 +229,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       }
     } catch (_) {}
 
-    if (mounted) {
+    if (mounted && !_isAutoDiscovering) {
       setState(() {
         _isConnectedToDesktop = false;
         _connectionStatusText = 'Not Connected to Desktop ($_desktopIp)';
@@ -475,7 +563,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
           children: [
             Icon(Icons.wifi, color: Colors.black),
             SizedBox(width: 8),
-            Text('Connect to Desktop Workstation', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Text('Desktop Connection & Sync', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           ],
         ),
         content: SingleChildScrollView(
@@ -491,11 +579,8 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                   child: const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Step 1: WiFi Connection', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-                      Text('Ensure this Android device and Windows PC are connected to the SAME WiFi network.', style: TextStyle(fontSize: 12)),
-                      SizedBox(height: 8),
-                      Text('Step 2: Copy Desktop IP', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-                      Text('Look at the top bar of your Windows computer screen for the HTTP Server IP (e.g. 192.168.1.25).', style: TextStyle(fontSize: 12)),
+                      Text('Automatic Connection', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                      Text('When Windows software is active on the same WiFi, this POS terminal connects automatically when app opens.', style: TextStyle(fontSize: 12)),
                     ],
                   ),
                 ),
@@ -503,7 +588,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                 TextField(
                   controller: desktopIpCtrl,
                   decoration: const InputDecoration(
-                    labelText: 'Desktop Workstation IP *',
+                    labelText: 'Desktop Workstation IP',
                     hintText: 'e.g. 192.168.1.25',
                     border: OutlineInputBorder(),
                   ),
@@ -516,6 +601,21 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                     hintText: 'e.g. Counter 1 HandPOS',
                     border: OutlineInputBorder(),
                   ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F172A),
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(42),
+                    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                  ),
+                  onPressed: () async {
+                    Navigator.of(ctx).pop();
+                    await _autoDiscoverAndConnectDesktop();
+                  },
+                  icon: const Icon(Icons.radar, size: 18),
+                  label: const Text('Auto-Detect Desktop on WiFi', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ],
             ),
@@ -556,7 +656,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
               }
             },
             icon: const Icon(Icons.sync, size: 18),
-            label: const Text('Connect & Sync Now', style: TextStyle(fontWeight: FontWeight.bold)),
+            label: const Text('Connect & Sync', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -741,7 +841,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                         borderRadius: BorderRadius.circular(2),
                       ),
                       child: Text(
-                        _isConnectedToDesktop ? 'SYNCED' : 'GUIDE & SYNC',
+                        _isConnectedToDesktop ? 'AUTO-CONNECTED' : 'AUTO-CONNECT',
                         style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
                       ),
                     ),
