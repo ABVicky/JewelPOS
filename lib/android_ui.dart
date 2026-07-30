@@ -46,11 +46,12 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
 
   // Settings & Connection State
   String _desktopIp = '192.168.1.25';
-  String _printerIp = '192.168.1.200';
+  String _printerIp = '127.0.0.1'; // Built-in thermal printer for Smart POS Model 1008
   int _printerPort = 9100;
-  String _terminalName = 'Android HandPOS 1';
-  String _terminalId = 'POS-01';
+  String _terminalName = 'Smart POS 1008 HandPOS';
+  String _terminalId = 'POS-1008';
 
+  bool _autoPrintOnScan = false;
   bool _isConnectedToDesktop = false;
   bool _isAutoDiscovering = false;
   String _connectionStatusText = 'Connecting...';
@@ -87,10 +88,11 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
         _desktopIp = prefs.getString('android_desktop_ip') ?? '192.168.1.25';
-        _printerIp = prefs.getString('android_printer_ip') ?? '192.168.1.200';
+        _printerIp = prefs.getString('android_printer_ip') ?? '127.0.0.1';
         _printerPort = prefs.getInt('android_printer_port') ?? 9100;
-        _terminalName = prefs.getString('android_terminal_name') ?? 'Android HandPOS 1';
-        _terminalId = prefs.getString('android_terminal_id') ?? 'POS-${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}';
+        _terminalName = prefs.getString('android_terminal_name') ?? 'Smart POS 1008 HandPOS';
+        _terminalId = prefs.getString('android_terminal_id') ?? 'POS-1008';
+        _autoPrintOnScan = prefs.getBool('android_auto_print') ?? false;
       });
 
       // Attempt immediate auto-connection
@@ -102,18 +104,20 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     } catch (_) {}
   }
 
-  Future<void> _saveSettings(String desktopIp, String printerIp, int port, String terminalName) async {
+  Future<void> _saveSettings(String desktopIp, String printerIp, int port, String terminalName, bool autoPrint) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('android_desktop_ip', desktopIp);
       await prefs.setString('android_printer_ip', printerIp);
       await prefs.setInt('android_printer_port', port);
       await prefs.setString('android_terminal_name', terminalName);
+      await prefs.setBool('android_auto_print', autoPrint);
       setState(() {
         _desktopIp = desktopIp;
         _printerIp = printerIp;
         _printerPort = port;
         _terminalName = terminalName;
+        _autoPrintOnScan = autoPrint;
       });
       _sendConnectivityPing();
       if (mounted) {
@@ -300,6 +304,11 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
           _isConnectedToDesktop = true;
           _connectionStatusText = 'Connected to Workstation ($_desktopIp:8080)';
         });
+
+        // Auto-print receipt if enabled
+        if (_autoPrintOnScan) {
+          await _sendToBuiltInPrinter();
+        }
       } else if (response.statusCode == 404) {
         _showSimpleDialog('Item Not Found', 'The item barcode $barcode was not found in inventory.');
       } else {
@@ -414,7 +423,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     });
   }
 
-  // --- ESC/POS RECEIPT PRINTING ---
+  // --- ESC/POS RECEIPT PRINTING (BUILT-IN 58MM THERMAL PRINTER FOR SMART POS 1008) ---
   List<int> _generateEscPosBytes() {
     final bytes = <int>[];
 
@@ -429,7 +438,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     bytes.addAll([0x1B, 0x21, 0x00]);
     bytes.addAll(utf8.encode("================================\n"));
 
-    // Header Table Columns
+    // Header Table Columns (32 columns max for 58mm paper roll)
     bytes.addAll([0x1B, 0x61, 0x00]); // Left align
     bytes.addAll(utf8.encode("Barcode      Item      Weight   \n"));
     bytes.addAll(utf8.encode("--------------------------------\n"));
@@ -464,6 +473,27 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     return bytes;
   }
 
+  Future<bool> _sendToBuiltInPrinter() async {
+    if (kIsWeb) return true;
+
+    final bytes = _generateEscPosBytes();
+    final List<String> targetHosts = [_printerIp, '127.0.0.1', 'localhost'];
+    final List<int> targetPorts = [_printerPort, 9100, 9108];
+
+    for (var host in targetHosts) {
+      for (var port in targetPorts) {
+        try {
+          final socket = await Socket.connect(host, port, timeout: const Duration(seconds: 1));
+          socket.add(bytes);
+          await socket.flush();
+          await socket.close();
+          return true;
+        } catch (_) {}
+      }
+    }
+    return false;
+  }
+
   Future<void> _printReceiptWithRetry() async {
     if (_scannedItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -472,22 +502,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       return;
     }
 
-    bool printSuccess = false;
-
-    if (kIsWeb) {
-      debugPrint('ESC/POS Receipt Printed (Web Mode): ${_scannedItems.length} items');
-      printSuccess = true;
-    } else {
-      try {
-        final socket = await Socket.connect(_printerIp, _printerPort, timeout: const Duration(seconds: 3));
-        socket.add(_generateEscPosBytes());
-        await socket.flush();
-        await socket.close();
-        printSuccess = true;
-      } catch (_) {
-        printSuccess = false;
-      }
-    }
+    bool printSuccess = await _sendToBuiltInPrinter();
 
     if (!mounted) return;
 
@@ -497,7 +512,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
           shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-          title: const Text('Receipt Printed Successfully', style: TextStyle(fontWeight: FontWeight.bold)),
+          title: const Text('Receipt Printed (Built-in 58mm Thermal)', style: TextStyle(fontWeight: FontWeight.bold)),
           content: const Text('Clear List?'),
           actions: [
             TextButton(
@@ -525,8 +540,8 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
           shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-          title: const Text('Printer Error', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-          content: Text('Could not print receipt to printer at $_printerIp:$_printerPort.\nPlease check printer power & paper status.'),
+          title: const Text('Built-in Printer Error', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+          content: const Text('Could not send print job to Smart POS 1008 internal thermal printer.\nPlease verify 58mm paper roll is installed.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
@@ -579,8 +594,8 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                   child: const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Automatic Connection', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-                      Text('When Windows software is active on the same WiFi, this POS terminal connects automatically when app opens.', style: TextStyle(fontSize: 12)),
+                      Text('Smart POS 1008 Alignment', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                      Text('• Built-in 58mm thermal printer ready.\n• Hardware side scanner button enabled.\n• Auto-connects to Windows PC when open.', style: TextStyle(fontSize: 12)),
                     ],
                   ),
                 ),
@@ -598,7 +613,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                   controller: terminalNameCtrl,
                   decoration: const InputDecoration(
                     labelText: 'Terminal Device Name',
-                    hintText: 'e.g. Counter 1 HandPOS',
+                    hintText: 'e.g. Smart POS 1008',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -634,7 +649,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
             ),
             onPressed: () async {
               final newIp = desktopIpCtrl.text.trim();
-              final newName = terminalNameCtrl.text.trim().isEmpty ? 'Android HandPOS' : terminalNameCtrl.text.trim();
+              final newName = terminalNameCtrl.text.trim().isEmpty ? 'Smart POS 1008' : terminalNameCtrl.text.trim();
               Navigator.of(ctx).pop();
 
               final prefs = await SharedPreferences.getInstance();
@@ -669,101 +684,84 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     final printerIpCtrl = TextEditingController(text: _printerIp);
     final printerPortCtrl = TextEditingController(text: _printerPort.toString());
     final terminalNameCtrl = TextEditingController(text: _terminalName);
+    bool tempAutoPrint = _autoPrintOnScan;
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-        title: const Text('HandPOS Settings', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: desktopIpCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Desktop IP',
-                  hintText: '192.168.1.25',
-                  border: OutlineInputBorder(),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+          title: const Text('Smart POS 1008 Settings', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: desktopIpCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Desktop IP',
+                    hintText: '192.168.1.25',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: printerIpCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Receipt Printer IP',
-                  hintText: '192.168.1.200',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: printerIpCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Internal Printer Address (Built-in)',
+                    hintText: '127.0.0.1',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: printerPortCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Receipt Printer Port',
-                  hintText: '9100',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: printerPortCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Internal Printer Port',
+                    hintText: '9100',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: terminalNameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Terminal Device Name',
-                  hintText: 'Android HandPOS 1',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: terminalNameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Terminal Device Name',
+                    hintText: 'Smart POS 1008 HandPOS',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF334155),
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size.fromHeight(42),
-                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  title: const Text('Auto-Print Receipt on Scan', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  subtitle: const Text('Automatically print receipt on built-in printer upon scanning tag', style: TextStyle(fontSize: 11)),
+                  value: tempAutoPrint,
+                  onChanged: (val) => setDlgState(() => tempAutoPrint = val),
                 ),
-                onPressed: () async {
-                  final targetIp = desktopIpCtrl.text.trim();
-                  final url = Uri.parse('http://$targetIp:8080/health');
-                  try {
-                    final res = await http.get(url).timeout(const Duration(seconds: 3));
-                    if (res.statusCode == 200 && (res.body.trim() == 'OK' || res.body.contains('ok')) && ctx.mounted) {
-                      _showSimpleDialog('Test Connection', 'Connected');
-                    } else if (ctx.mounted) {
-                      _showSimpleDialog('Test Connection', 'Connection Failed');
-                    }
-                  } catch (_) {
-                    if (ctx.mounted) {
-                      _showSimpleDialog('Test Connection', 'Connection Failed');
-                    }
-                  }
-                },
-                icon: const Icon(Icons.network_check, size: 18),
-                label: const Text('Test Connection', style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.black,
-              foregroundColor: Colors.white,
-              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+              ],
             ),
-            onPressed: () {
-              final port = int.tryParse(printerPortCtrl.text.trim()) ?? 9100;
-              Navigator.of(ctx).pop();
-              _saveSettings(desktopIpCtrl.text.trim(), printerIpCtrl.text.trim(), port, terminalNameCtrl.text.trim());
-            },
-            child: const Text('Save'),
           ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.black,
+                foregroundColor: Colors.white,
+                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+              ),
+              onPressed: () {
+                final port = int.tryParse(printerPortCtrl.text.trim()) ?? 9100;
+                Navigator.of(ctx).pop();
+                _saveSettings(desktopIpCtrl.text.trim(), printerIpCtrl.text.trim(), port, terminalNameCtrl.text.trim(), tempAutoPrint);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -801,7 +799,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         elevation: 0,
-        title: const Text('JEWEL POS (Android HandPOS)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        title: const Text('JEWEL POS (Smart POS 1008)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
@@ -850,7 +848,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
               ),
             ),
 
-            // Hidden Hardware Laser Scanner Text Receiver
+            // Hidden Hardware Laser & One-Key Side Scanner Text Receiver
             Opacity(
               opacity: 0,
               child: SizedBox(
@@ -869,7 +867,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
               ),
             ),
 
-            // Top Action Controls (Large High-Contrast Buttons)
+            // Top Action Controls (Large High-Contrast Buttons for Smart POS 1008)
             Container(
               color: const Color(0xFFF1F5F9),
               padding: const EdgeInsets.all(12),
@@ -916,8 +914,8 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                             shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
                           ),
                           onPressed: _printReceiptWithRetry,
-                          icon: const Icon(Icons.receipt, size: 18),
-                          label: const Text('Print Receipt', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                          icon: const Icon(Icons.print, size: 18),
+                          label: const Text('Print Receipt (Built-in)', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                         ),
                       ),
                       const SizedBox(width: 8),
