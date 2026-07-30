@@ -982,24 +982,75 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                       separatorBuilder: (context, index) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final item = _scannedItems[index];
-                        return ListTile(
-                          dense: true,
-                          title: Row(
-                            children: [
-                              Text(
-                                item.itemName,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                              ),
-                              const Spacer(),
-                              Text(
-                                '${item.weight.toStringAsFixed(3)} g',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black),
-                              ),
-                            ],
+                        return Dismissible(
+                          key: ValueKey('${item.barcode}_${index}_${item.weight}'),
+                          direction: DismissDirection.horizontal,
+                          background: Container(
+                            color: const Color(0xFF991B1B),
+                            alignment: Alignment.centerLeft,
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: const Row(
+                              children: [
+                                Icon(Icons.delete, color: Colors.white),
+                                SizedBox(width: 8),
+                                Text('Remove', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
                           ),
-                          subtitle: Text(
-                            'Barcode: ${item.barcode}  |  Category: ${item.category}  |  Purity: ${item.purity}',
-                            style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                          secondaryBackground: Container(
+                            color: const Color(0xFF991B1B),
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: const Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                Text('Remove', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                SizedBox(width: 8),
+                                Icon(Icons.delete, color: Colors.white),
+                              ],
+                            ),
+                          ),
+                          onDismissed: (_) {
+                            final removedName = item.itemName;
+                            final itemNum = index + 1;
+                            setState(() {
+                              _scannedItems.removeAt(index);
+                            });
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Item #$itemNum ($removedName) removed'),
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          },
+                          child: ListTile(
+                            dense: true,
+                            leading: CircleAvatar(
+                              backgroundColor: const Color(0xFF0F172A),
+                              foregroundColor: Colors.white,
+                              radius: 14,
+                              child: Text(
+                                '#${index + 1}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                              ),
+                            ),
+                            title: Row(
+                              children: [
+                                Text(
+                                  item.itemName,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  '${item.weight.toStringAsFixed(3)} g',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black),
+                                ),
+                              ],
+                            ),
+                            subtitle: Text(
+                              'Barcode: ${item.barcode}  |  Category: ${item.category}  |  Purity: ${item.purity}',
+                              style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                            ),
                           ),
                         );
                       },

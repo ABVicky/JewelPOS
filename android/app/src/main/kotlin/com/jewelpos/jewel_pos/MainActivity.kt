@@ -56,13 +56,13 @@ class MainActivity : FlutterActivity() {
 
         // 2. Try Internal Loopback TCP Ports used by Smart POS / Android thermal printers
         val targetHosts = arrayOf("127.0.0.1", "localhost", "0.0.0.0")
-        val targetPorts = intArrayOf(9100, 9108, 8000, 8888, 9000, 6001, 7000, 5800, 3000, 9101, 9102, 20001, 10008)
+        val targetPorts = intArrayOf(9100, 9108, 8000, 8888, 9000, 6001, 7000, 5800, 3000, 9101, 9102, 20001, 10008, 8080, 8081)
 
         for (host in targetHosts) {
             for (port in targetPorts) {
                 try {
                     val socket = Socket()
-                    socket.connect(InetSocketAddress(host, port), 400)
+                    socket.connect(InetSocketAddress(host, port), 300)
                     val out = socket.getOutputStream()
                     out.write(bytes)
                     out.flush()
@@ -74,14 +74,19 @@ class MainActivity : FlutterActivity() {
 
         // 3. Try Internal Unix Serial Device Files for POS thermal printer hardware
         val serialPaths = arrayOf(
-            "/dev/ttyS1", "/dev/ttyS0", "/dev/ttyMT0", "/dev/ttyMT1",
-            "/dev/ttyS3", "/dev/userial0", "/dev/ttyUSB0"
+            "/dev/ttyS1", "/dev/ttyS0", "/dev/ttyS2", "/dev/ttyS3", "/dev/ttyS4",
+            "/dev/ttyMT0", "/dev/ttyMT1", "/dev/ttyMT2", "/dev/ttyUSB0", "/dev/ttyUSB1",
+            "/dev/userial0", "/dev/gprinter", "/dev/printer", "/dev/pos_printer"
         )
 
         for (path in serialPaths) {
             try {
                 val file = File(path)
-                if (file.exists() && file.canWrite()) {
+                if (file.exists()) {
+                    try {
+                        Runtime.getRuntime().exec("chmod 666 $path")
+                    } catch (_: Exception) {}
+
                     val fos = FileOutputStream(file)
                     fos.write(bytes)
                     fos.flush()
