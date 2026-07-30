@@ -1,6 +1,7 @@
 package com.jewelpos.jewel_pos
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
@@ -48,7 +49,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun printToInternalPrinter(bytes: ByteArray, customIp: String?, customPort: Int?, text: String?): String {
-        // 1. Try Custom IP & Port if specified
+        // 1. Try Custom IP & Port if specified and non-loopback
         if (!customIp.isNullOrEmpty() && customPort != null && customIp != "127.0.0.1" && customIp != "localhost") {
             try {
                 val socket = Socket()
@@ -71,7 +72,7 @@ class MainActivity : FlutterActivity() {
             for (port in targetPorts) {
                 try {
                     val socket = Socket()
-                    socket.connect(InetSocketAddress(host, port), 250)
+                    socket.connect(InetSocketAddress(host, port), 200)
                     val out = socket.getOutputStream()
                     out.write(bytes)
                     out.flush()
@@ -81,7 +82,7 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // 3. Try Internal Unix Serial Device Files for POS thermal printer hardware
+        // 3. Try Internal Unix Serial Device Files for Smart POS 1008 thermal printer hardware
         val serialPaths = arrayOf(
             "/dev/ttyS1", "/dev/ttyS0", "/dev/ttyS2", "/dev/ttyS3", "/dev/ttyS4",
             "/dev/ttyMT0", "/dev/ttyMT1", "/dev/ttyMT2", "/dev/ttyUSB0", "/dev/ttyUSB1",
@@ -93,19 +94,53 @@ class MainActivity : FlutterActivity() {
                 val file = File(path)
                 if (file.exists()) {
                     try {
-                        Runtime.getRuntime().exec("chmod 666 $path")
+                        Runtime.getRuntime().exec(arrayOf("chmod", "666", path)).waitFor()
                     } catch (_: Exception) {}
 
-                    val fos = FileOutputStream(file)
-                    fos.write(bytes)
-                    fos.flush()
-                    fos.close()
-                    return "SUCCESS_SERIAL_$path"
+                    try {
+                        val fos = FileOutputStream(file)
+                        fos.write(bytes)
+                        fos.flush()
+                        fos.close()
+                        return "SUCCESS_SERIAL_$path"
+                    } catch (_: Exception) {
+                        // Shell fallback to write bytes to serial device
+                        try {
+                            val tempFile = File.createTempFile("receipt", ".bin", cacheDir)
+                            tempFile.writeBytes(bytes)
+                            Runtime.getRuntime().exec(arrayOf("sh", "-c", "cat ${tempFile.absolutePath} > $path")).waitFor()
+                            tempFile.delete()
+                            return "SUCCESS_SHELL_SERIAL_$path"
+                        } catch (_: Exception) {}
+                    }
                 }
             } catch (_: Exception) {}
         }
 
-        // 4. Try Android PrintManager System Service Fallback
+        // 4. Send Vendor POS Printer Broadcast Intents
+        val vendorIntents = arrayOf(
+            "com.pos.print",
+            "com.gprinter.service",
+            "woyou.aio.service.action.PRINT",
+            "android.intent.action.PRINTER",
+            "com.zcs.postest",
+            "com.android.print"
+        )
+
+        for (intentAction in vendorIntents) {
+            try {
+                val intent = Intent(intentAction)
+                intent.putExtra("bytes", bytes)
+                intent.putExtra("data", bytes)
+                if (!text.isNullOrEmpty()) {
+                    intent.putExtra("text", text)
+                    intent.putExtra("msg", text)
+                }
+                sendBroadcast(intent)
+            } catch (_: Exception) {}
+        }
+
+        // 5. Try Android PrintManager System Service Fallback
         if (!text.isNullOrEmpty()) {
             try {
                 val printManager = getSystemService(Context.PRINT_SERVICE) as? PrintManager
