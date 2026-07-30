@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -473,17 +474,33 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     return bytes;
   }
 
+  static const _printerChannel = MethodChannel('jewel_pos/printer');
+
   Future<bool> _sendToBuiltInPrinter() async {
     if (kIsWeb) return true;
 
-    final bytes = _generateEscPosBytes();
-    final List<String> targetHosts = [_printerIp, '127.0.0.1', 'localhost'];
-    final List<int> targetPorts = [_printerPort, 9100, 9108];
+    final bytes = Uint8List.fromList(_generateEscPosBytes());
+
+    // 1. Invoke Native Android MethodChannel (Serial & Native Port scanner)
+    try {
+      final bool? result = await _printerChannel.invokeMethod<bool>('printBytes', {
+        'bytes': bytes,
+        'ip': _printerIp,
+        'port': _printerPort,
+      });
+      if (result == true) return true;
+    } catch (e) {
+      debugPrint('Native printer MethodChannel exception: $e');
+    }
+
+    // 2. Fallback Dart Socket Scanner across internal POS thermal ports
+    final List<String> targetHosts = [_printerIp, '127.0.0.1', 'localhost', '0.0.0.0'];
+    final List<int> targetPorts = [_printerPort, 9100, 9108, 8000, 8888, 9000, 6001, 7000, 5800, 3000, 9101, 9102, 20001, 10008];
 
     for (var host in targetHosts) {
       for (var port in targetPorts) {
         try {
-          final socket = await Socket.connect(host, port, timeout: const Duration(seconds: 1));
+          final socket = await Socket.connect(host, port, timeout: const Duration(milliseconds: 300));
           socket.add(bytes);
           await socket.flush();
           await socket.close();

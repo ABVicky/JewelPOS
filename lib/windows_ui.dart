@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:barcode_widget/barcode_widget.dart';
 import 'db.dart';
 import 'printer.dart';
 import 'server_helper.dart';
@@ -837,25 +838,37 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF1F5F9),
+                  color: Colors.white,
                   border: Border.all(color: const Color(0xFFCBD5E1)),
                 ),
                 child: Column(
                   children: [
-                    const Icon(Icons.barcode_reader, size: 48, color: Color(0xFF0F172A)),
-                    const SizedBox(height: 8),
-                    SelectableText(
-                      item.barcode,
+                    BarcodeWidget(
+                      barcode: Barcode.code128(),
+                      data: item.barcode,
+                      width: 290,
+                      height: 85,
+                      drawText: true,
                       style: const TextStyle(
-                        fontSize: 22,
+                        fontSize: 16,
                         fontWeight: FontWeight.bold,
                         fontFamily: 'monospace',
-                        letterSpacing: 1.5,
                         color: Color(0xFF0F172A),
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    const Text('Code128 Barcode Tag', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                    const SizedBox(height: 12),
+                    BarcodeWidget(
+                      barcode: Barcode.qrCode(),
+                      data: item.barcode,
+                      width: 90,
+                      height: 90,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Scannable Barcode Tag — Point HandPOS Laser or Camera at Screen',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold),
+                    ),
                   ],
                 ),
               ),

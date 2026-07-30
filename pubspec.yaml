@@ -41,6 +41,7 @@ dependencies:
   http: ^1.6.0
   shared_preferences: ^2.5.5
   mobile_scanner: ^7.4.0
+  barcode_widget: ^2.0.4
   sqflite_common_ffi_web: ^1.1.1
   flutter_lints: any
 
