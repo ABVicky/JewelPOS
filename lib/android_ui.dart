@@ -428,47 +428,64 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
   List<int> _generateEscPosBytes({List<ScannedPosItem>? customList}) {
     final itemsToPrint = customList ?? _scannedItems;
     final bytes = <int>[];
+    final now = DateTime.now();
+    final dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+    final timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
 
     // Initialize ESC/POS
     bytes.addAll([0x1B, 0x40]);
-    // Center Align
+    
+    // Header Title (Double Height & Width, Center Align)
     bytes.addAll([0x1B, 0x61, 0x01]);
-    // Double height & width header
     bytes.addAll([0x1B, 0x21, 0x30]);
     bytes.addAll(utf8.encode("JEWEL POS\n"));
+    
     // Reset Format
     bytes.addAll([0x1B, 0x21, 0x00]);
+    bytes.addAll(utf8.encode("COUNTER DISPATCH VOUCHER\n"));
     bytes.addAll(utf8.encode("================================\n"));
 
-    // Header Table Columns (32 columns max for 58mm paper roll)
+    // Date & Terminal Info
     bytes.addAll([0x1B, 0x61, 0x00]); // Left align
-    bytes.addAll(utf8.encode("Barcode      Item      Weight   \n"));
+    bytes.addAll(utf8.encode("Date: $dateStr    Time: $timeStr\n"));
+    bytes.addAll(utf8.encode("Terminal: $_terminalName\n"));
+    bytes.addAll(utf8.encode("--------------------------------\n"));
+    bytes.addAll(utf8.encode("#  Item / Barcode        Weight \n"));
     bytes.addAll(utf8.encode("--------------------------------\n"));
 
     double totalWeight = 0.0;
+    int index = 1;
     for (var item in itemsToPrint) {
       totalWeight += item.weight;
-      final bcStr = item.barcode.padRight(12).substring(0, 12);
-      final itemStr = item.itemName.padRight(10).substring(0, 10);
-      final wtStr = item.weight.toStringAsFixed(3).padLeft(8);
-      bytes.addAll(utf8.encode("$bcStr$itemStr$wtStr\n"));
+      final numStr = "#$index".padRight(3);
+      final nameStr = "${item.itemName} (${item.purity})";
+      bytes.addAll(utf8.encode("$numStr$nameStr\n"));
+
+      final bcLabel = "   BC: ${item.barcode}".padRight(22);
+      final wtStr = "${item.weight.toStringAsFixed(3)} g".padLeft(10);
+      bytes.addAll(utf8.encode("$bcLabel$wtStr\n"));
+      bytes.addAll(utf8.encode("--------------------------------\n"));
+      index++;
     }
 
-    bytes.addAll(utf8.encode("--------------------------------\n"));
+    // Totals Summary (Bold)
+    bytes.addAll([0x1B, 0x45, 0x01]); // Emphasized mode ON
     final countStr = itemsToPrint.length.toString();
     final totWtStr = "${totalWeight.toStringAsFixed(3)} g";
 
-    final countPad = ' ' * (32 - "Items".length - countStr.length);
-    bytes.addAll(utf8.encode("Items$countPad$countStr\n"));
+    final countPad = ' ' * (32 - "TOTAL ITEMS".length - countStr.length);
+    bytes.addAll(utf8.encode("TOTAL ITEMS$countPad$countStr\n"));
 
-    final wtPad = ' ' * (32 - "Weight".length - totWtStr.length);
-    bytes.addAll(utf8.encode("Weight$wtPad$totWtStr\n"));
+    final wtPad = ' ' * (32 - "TOTAL WEIGHT".length - totWtStr.length);
+    bytes.addAll(utf8.encode("TOTAL WEIGHT$wtPad$totWtStr\n"));
+    bytes.addAll([0x1B, 0x45, 0x00]); // Emphasized mode OFF
 
     bytes.addAll(utf8.encode("================================\n"));
 
     // Footer
     bytes.addAll([0x1B, 0x61, 0x01]); // Center align
-    bytes.addAll(utf8.encode("Thank You\n\n\n"));
+    bytes.addAll(utf8.encode("*** COUNTER COPY ***\n"));
+    bytes.addAll(utf8.encode("Thank You For Shopping!\n\n\n\n"));
     // Feed and Cut (GS V 66 0)
     bytes.addAll([0x1D, 0x56, 0x42, 0x00]);
 
@@ -514,24 +531,47 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
 
   Future<bool> _printViaAndroidSystemManager({List<ScannedPosItem>? customList}) async {
     final itemsToPrint = customList ?? _scannedItems;
+    final now = DateTime.now();
+    final dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+    final timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
+
     final StringBuffer sb = StringBuffer();
-    sb.writeln("JEWEL POS");
-    sb.writeln("=================================");
-    sb.writeln("Barcode      Item      Weight   ");
-    sb.writeln("---------------------------------");
+    sb.writeln("           JEWEL POS");
+    sb.writeln("    COUNTER DISPATCH VOUCHER");
+    sb.writeln("================================");
+    sb.writeln("Date: $dateStr    Time: $timeStr");
+    sb.writeln("Terminal: $_terminalName");
+    sb.writeln("--------------------------------");
+    sb.writeln("#  Item / Barcode        Weight ");
+    sb.writeln("--------------------------------");
+
     double totalWeight = 0.0;
+    int index = 1;
     for (var item in itemsToPrint) {
       totalWeight += item.weight;
-      final bcStr = item.barcode.padRight(12).substring(0, 12);
-      final itemStr = item.itemName.padRight(10).substring(0, 10);
-      final wtStr = item.weight.toStringAsFixed(3).padLeft(8);
-      sb.writeln("$bcStr$itemStr$wtStr");
+      final numStr = "#$index".padRight(3);
+      final nameStr = "${item.itemName} (${item.purity})";
+      sb.writeln("$numStr$nameStr");
+
+      final bcLabel = "   BC: ${item.barcode}".padRight(22);
+      final wtStr = "${item.weight.toStringAsFixed(3)} g".padLeft(10);
+      sb.writeln("$bcLabel$wtStr");
+      sb.writeln("--------------------------------");
+      index++;
     }
-    sb.writeln("---------------------------------");
-    sb.writeln("Total Items: ${itemsToPrint.length}");
-    sb.writeln("Total Weight: ${totalWeight.toStringAsFixed(3)} g");
-    sb.writeln("=================================");
-    sb.writeln("Thank You");
+
+    final countStr = itemsToPrint.length.toString();
+    final totWtStr = "${totalWeight.toStringAsFixed(3)} g";
+
+    final countPad = ' ' * (32 - "TOTAL ITEMS".length - countStr.length);
+    sb.writeln("TOTAL ITEMS$countPad$countStr");
+
+    final wtPad = ' ' * (32 - "TOTAL WEIGHT".length - totWtStr.length);
+    sb.writeln("TOTAL WEIGHT$wtPad$totWtStr");
+    sb.writeln("================================");
+    sb.writeln("      *** COUNTER COPY ***");
+    sb.writeln("   Thank You For Shopping!");
+    sb.writeln("\n\n");
 
     final bytes = Uint8List.fromList(_generateEscPosBytes(customList: customList));
 
