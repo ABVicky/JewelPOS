@@ -1,5 +1,18 @@
 package com.jewelpos.jewel_pos
 
+import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.pdf.PdfDocument
+import android.os.Bundle
+import android.os.CancellationSignal
+import android.os.ParcelFileDescriptor
+import android.print.PageRange
+import android.print.PrintAttributes
+import android.print.PrintDocumentAdapter
+import android.print.PrintDocumentInfo
+import android.print.PrintManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -15,28 +28,100 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
-            if (call.method == "printBytes") {
-                val bytes = call.argument<ByteArray>("bytes")
-                val customIp = call.argument<String>("ip")
-                val customPort = call.argument<Int>("port")
-                val mode = call.argument<String>("mode") ?: "auto"
-
-                if (bytes == null) {
-                    result.error("INVALID_ARGS", "Print bytes cannot be null", null)
-                    return@setMethodCallHandler
-                }
-
-                // Run printer connection in background thread to avoid blocking main UI thread
-                Thread {
-                    val success = printToInternalPrinter(bytes, customIp, customPort, mode)
-                    runOnUiThread {
-                        result.success(success)
+            when (call.method) {
+                "printText" -> {
+                    val text = call.argument<String>("text") ?: ""
+                    try {
+                        printReceiptViaSystemManager(text)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
                     }
-                }.start()
-            } else {
-                result.notImplemented()
+                }
+                "printBytes" -> {
+                    val bytes = call.argument<ByteArray>("bytes")
+                    val customIp = call.argument<String>("ip")
+                    val customPort = call.argument<Int>("port")
+                    val mode = call.argument<String>("mode") ?: "auto"
+
+                    if (bytes == null) {
+                        result.error("INVALID_ARGS", "Print bytes cannot be null", null)
+                        return@setMethodCallHandler
+                    }
+
+                    Thread {
+                        val success = printToInternalPrinter(bytes, customIp, customPort, mode)
+                        runOnUiThread {
+                            result.success(success)
+                        }
+                    }.start()
+                }
+                else -> result.notImplemented()
             }
         }
+    }
+
+    private fun printReceiptViaSystemManager(receiptText: String) {
+        val printManager = getSystemService(Context.PRINT_SERVICE) as PrintManager
+        val jobName = "JewelPOS_Receipt_${System.currentTimeMillis()}"
+
+        printManager.print(jobName, object : PrintDocumentAdapter() {
+            private var pdfDocument: PdfDocument? = null
+
+            override fun onLayout(
+                oldAttributes: PrintAttributes?,
+                newAttributes: PrintAttributes,
+                cancellationSignal: CancellationSignal?,
+                callback: LayoutResultCallback,
+                extras: Bundle?
+            ) {
+                pdfDocument = PdfDocument()
+                val pageInfo = PdfDocument.PageInfo.Builder(200, 600, 1).create()
+                val page = pdfDocument!!.startPage(pageInfo)
+
+                val canvas: Canvas = page.canvas
+                val paint = Paint()
+                paint.color = Color.BLACK
+                paint.textSize = 10f
+
+                var y = 20f
+                val lines = receiptText.split("\n")
+                for (line in lines) {
+                    canvas.drawText(line, 10f, y, paint)
+                    y += 14f
+                }
+
+                pdfDocument!!.finishPage(page)
+
+                if (cancellationSignal?.isCanceled == true) {
+                    callback.onLayoutCancelled()
+                    return
+                }
+
+                val info = PrintDocumentInfo.Builder("receipt.pdf")
+                    .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                    .setPageCount(1)
+                    .build()
+                callback.onLayoutFinished(info, true)
+            }
+
+            override fun onWrite(
+                pages: Array<out PageRange>?,
+                destination: ParcelFileDescriptor,
+                cancellationSignal: CancellationSignal?,
+                callback: WriteResultCallback
+            ) {
+                try {
+                    pdfDocument?.writeTo(FileOutputStream(destination.fileDescriptor))
+                    callback.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
+                } catch (e: Exception) {
+                    callback.onWriteFailed(e.message)
+                } finally {
+                    pdfDocument?.close()
+                    pdfDocument = null
+                }
+            }
+        }, null)
     }
 
     private fun printToInternalPrinter(bytes: ByteArray, customIp: String?, customPort: Int?, mode: String): Boolean {
@@ -87,7 +172,6 @@ class MainActivity : FlutterActivity() {
             try {
                 val file = File(path)
                 if (file.exists()) {
-                    // Set baud rate 115200 raw mode via stty before writing
                     try {
                         Runtime.getRuntime().exec(arrayOf("sh", "-c", "stty -F $path 115200 raw 2>/dev/null || chmod 666 $path"))
                     } catch (_: Exception) {}

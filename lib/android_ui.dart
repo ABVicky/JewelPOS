@@ -512,6 +512,34 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     return false;
   }
 
+  Future<void> _printViaAndroidSystemManager({List<ScannedPosItem>? customList}) async {
+    final itemsToPrint = customList ?? _scannedItems;
+    final StringBuffer sb = StringBuffer();
+    sb.writeln("JEWEL POS");
+    sb.writeln("=================================");
+    sb.writeln("Barcode      Item      Weight   ");
+    sb.writeln("---------------------------------");
+    double totalWeight = 0.0;
+    for (var item in itemsToPrint) {
+      totalWeight += item.weight;
+      final bcStr = item.barcode.padRight(12).substring(0, 12);
+      final itemStr = item.itemName.padRight(10).substring(0, 10);
+      final wtStr = item.weight.toStringAsFixed(3).padLeft(8);
+      sb.writeln("$bcStr$itemStr$wtStr");
+    }
+    sb.writeln("---------------------------------");
+    sb.writeln("Total Items: ${itemsToPrint.length}");
+    sb.writeln("Total Weight: ${totalWeight.toStringAsFixed(3)} g");
+    sb.writeln("=================================");
+    sb.writeln("Thank You");
+
+    try {
+      await _printerChannel.invokeMethod('printText', {'text': sb.toString()});
+    } catch (e) {
+      debugPrint('Android PrintManager error: $e');
+    }
+  }
+
   Future<void> _printReceiptWithRetry() async {
     if (_scannedItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -558,8 +586,8 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
           shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-          title: const Text('Built-in Printer Error', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-          content: const Text('Could not print receipt to Smart POS 1008 internal thermal printer.\n\nPlease check printer paper roll or select a custom printer port in Settings.'),
+          title: const Text('Built-in Printer Alternative Options', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+          content: const Text('Could not send direct raw socket job to thermal printer.\n\nYou can print directly via Android System Print Service below or adjust settings.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
@@ -568,9 +596,9 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
             OutlinedButton(
               onPressed: () {
                 Navigator.of(ctx).pop();
-                _openSettingsDialog();
+                _printViaAndroidSystemManager();
               },
-              child: const Text('Open Settings'),
+              child: const Text('Use System Printer', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
@@ -582,7 +610,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                 Navigator.of(ctx).pop();
                 _printReceiptWithRetry();
               },
-              child: const Text('Retry', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text('Retry Raw Socket', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
