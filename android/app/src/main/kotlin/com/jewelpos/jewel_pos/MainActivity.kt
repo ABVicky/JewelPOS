@@ -1,5 +1,14 @@
 package com.jewelpos.jewel_pos
 
+import android.content.Context
+import android.os.Bundle
+import android.os.CancellationSignal
+import android.os.ParcelFileDescriptor
+import android.print.PageRange
+import android.print.PrintAttributes
+import android.print.PrintDocumentAdapter
+import android.print.PrintDocumentInfo
+import android.print.PrintManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -19,17 +28,17 @@ class MainActivity : FlutterActivity() {
                 val bytes = call.argument<ByteArray>("bytes")
                 val customIp = call.argument<String>("ip")
                 val customPort = call.argument<Int>("port")
+                val text = call.argument<String>("text")
 
                 if (bytes == null) {
                     result.error("INVALID_ARGS", "Print bytes cannot be null", null)
                     return@setMethodCallHandler
                 }
 
-                // Run printer connection in background thread to avoid blocking main UI thread
                 Thread {
-                    val success = printToInternalPrinter(bytes, customIp, customPort)
+                    val status = printToInternalPrinter(bytes, customIp, customPort, text)
                     runOnUiThread {
-                        result.success(success)
+                        result.success(status)
                     }
                 }.start()
             } else {
@@ -38,8 +47,8 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun printToInternalPrinter(bytes: ByteArray, customIp: String?, customPort: Int?): Boolean {
-        // 1. Try Custom IP & Port if specified and non-loopback
+    private fun printToInternalPrinter(bytes: ByteArray, customIp: String?, customPort: Int?, text: String?): String {
+        // 1. Try Custom IP & Port if specified
         if (!customIp.isNullOrEmpty() && customPort != null && customIp != "127.0.0.1" && customIp != "localhost") {
             try {
                 val socket = Socket()
@@ -48,13 +57,13 @@ class MainActivity : FlutterActivity() {
                 out.write(bytes)
                 out.flush()
                 socket.close()
-                return true
+                return "SUCCESS_CUSTOM_SOCKET"
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
 
-        // 2. Try Internal Loopback TCP Ports used by Smart POS / Android thermal printers
+        // 2. Try Internal Loopback TCP Ports used by Smart POS 1008 & Android thermal printers
         val targetHosts = arrayOf("127.0.0.1", "localhost", "0.0.0.0")
         val targetPorts = intArrayOf(9100, 9108, 8000, 8888, 9000, 6001, 7000, 5800, 3000, 9101, 9102, 20001, 10008, 8080, 8081)
 
@@ -62,12 +71,12 @@ class MainActivity : FlutterActivity() {
             for (port in targetPorts) {
                 try {
                     val socket = Socket()
-                    socket.connect(InetSocketAddress(host, port), 300)
+                    socket.connect(InetSocketAddress(host, port), 250)
                     val out = socket.getOutputStream()
                     out.write(bytes)
                     out.flush()
                     socket.close()
-                    return true
+                    return "SUCCESS_SOCKET_$port"
                 } catch (_: Exception) {}
             }
         }
@@ -91,11 +100,61 @@ class MainActivity : FlutterActivity() {
                     fos.write(bytes)
                     fos.flush()
                     fos.close()
-                    return true
+                    return "SUCCESS_SERIAL_$path"
                 }
             } catch (_: Exception) {}
         }
 
-        return false
+        // 4. Try Android PrintManager System Service Fallback
+        if (!text.isNullOrEmpty()) {
+            try {
+                val printManager = getSystemService(Context.PRINT_SERVICE) as? PrintManager
+                if (printManager != null) {
+                    runOnUiThread {
+                        try {
+                            val printAdapter = object : PrintDocumentAdapter() {
+                                override fun onLayout(
+                                    oldAttributes: PrintAttributes?,
+                                    newAttributes: PrintAttributes?,
+                                    cancellationSignal: CancellationSignal?,
+                                    callback: LayoutResultCallback?,
+                                    extras: Bundle?
+                                ) {
+                                    if (cancellationSignal?.isCanceled == true) {
+                                        callback?.onLayoutCancelled()
+                                        return
+                                    }
+                                    val builder = PrintDocumentInfo.Builder("JewelPOS_Receipt")
+                                        .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                                        .setPageCount(1)
+                                    callback?.onLayoutFinished(builder.build(), true)
+                                }
+
+                                override fun onWrite(
+                                    pages: Array<out PageRange>?,
+                                    destination: ParcelFileDescriptor?,
+                                    cancellationSignal: CancellationSignal?,
+                                    callback: WriteResultCallback?
+                                ) {
+                                    try {
+                                        val out = FileOutputStream(destination?.fileDescriptor)
+                                        out.write(text.toByteArray())
+                                        out.flush()
+                                        out.close()
+                                        callback?.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
+                                    } catch (e: Exception) {
+                                        callback?.onWriteFailed(e.message)
+                                    }
+                                }
+                            }
+                            printManager.print("JewelPOS_Receipt", printAdapter, PrintAttributes.Builder().build())
+                        } catch (_: Exception) {}
+                    }
+                    return "SUCCESS_SYSTEM_PRINT"
+                }
+            } catch (_: Exception) {}
+        }
+
+        return "FAILED_PRINTER_UNREACHABLE"
     }
 }

@@ -474,21 +474,51 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     return bytes;
   }
 
+  String _generatePlainTextReceipt() {
+    final buffer = StringBuffer();
+    buffer.writeln('================================');
+    buffer.writeln('           JEWEL POS            ');
+    buffer.writeln('================================');
+    buffer.writeln('Barcode      Item      Weight   ');
+    buffer.writeln('--------------------------------');
+
+    double totalWeight = 0.0;
+    for (var item in _scannedItems) {
+      totalWeight += item.weight;
+      final bcStr = item.barcode.padRight(12).substring(0, 12);
+      final itemStr = item.itemName.padRight(10).substring(0, 10);
+      final wtStr = item.weight.toStringAsFixed(3).padLeft(8);
+      buffer.writeln('$bcStr$itemStr$wtStr');
+    }
+
+    buffer.writeln('--------------------------------');
+    buffer.writeln('Total Items: ${_scannedItems.length}');
+    buffer.writeln('Total Weight: ${totalWeight.toStringAsFixed(3)} g');
+    buffer.writeln('================================');
+    buffer.writeln('           Thank You            \n\n');
+    return buffer.toString();
+  }
+
   static const _printerChannel = MethodChannel('jewel_pos/printer');
 
   Future<bool> _sendToBuiltInPrinter() async {
     if (kIsWeb) return true;
 
     final bytes = Uint8List.fromList(_generateEscPosBytes());
+    final plainText = _generatePlainTextReceipt();
 
-    // 1. Invoke Native Android MethodChannel (Serial & Native Port scanner)
+    // 1. Invoke Native Android MethodChannel (Serial & Native Port scanner & System Print)
     try {
-      final bool? result = await _printerChannel.invokeMethod<bool>('printBytes', {
+      final String? result = await _printerChannel.invokeMethod<String>('printBytes', {
         'bytes': bytes,
         'ip': _printerIp,
         'port': _printerPort,
+        'text': plainText,
       });
-      if (result == true) return true;
+      if (result != null && result.startsWith('SUCCESS')) {
+        debugPrint('Printer success status: $result');
+        return true;
+      }
     } catch (e) {
       debugPrint('Native printer MethodChannel exception: $e');
     }
