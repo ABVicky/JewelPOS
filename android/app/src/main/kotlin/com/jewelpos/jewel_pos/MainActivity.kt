@@ -1,6 +1,7 @@
 package com.jewelpos.jewel_pos
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -31,7 +32,11 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "printText" -> {
                     val text = call.argument<String>("text") ?: ""
+                    val bytes = call.argument<ByteArray>("bytes")
                     try {
+                        if (bytes != null) {
+                            sendDirectPosPrinterIntents(text, bytes)
+                        }
                         printReceiptViaSystemManager(text)
                         result.success(true)
                     } catch (e: Exception) {
@@ -58,6 +63,25 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    private fun sendDirectPosPrinterIntents(text: String, bytes: ByteArray) {
+        val actions = arrayOf(
+            "com.pos.printer.PRINT",
+            "net.pos.printer.PRINT",
+            "com.pos.print",
+            "android.intent.action.POS_PRINT",
+            "com.gprinter.postest"
+        )
+        for (act in actions) {
+            try {
+                val intent = Intent(act)
+                intent.putExtra("text", text)
+                intent.putExtra("bytes", bytes)
+                intent.putExtra("content", text)
+                sendBroadcast(intent)
+            } catch (_: Exception) {}
         }
     }
 
