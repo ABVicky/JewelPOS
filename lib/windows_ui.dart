@@ -816,6 +816,100 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     );
   }
 
+  void _showBarcodeDetailsDialog(InventoryItem item) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+        title: Row(
+          children: [
+            const Icon(Icons.qr_code_2, color: Color(0xFF0F172A), size: 24),
+            const SizedBox(width: 8),
+            Text('Barcode Details (${item.barcode})'),
+          ],
+        ),
+        content: SizedBox(
+          width: 380,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                ),
+                child: Column(
+                  children: [
+                    const Icon(Icons.barcode_reader, size: 48, color: Color(0xFF0F172A)),
+                    const SizedBox(height: 8),
+                    SelectableText(
+                      item.barcode,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'monospace',
+                        letterSpacing: 1.5,
+                        color: Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text('Code128 Barcode Tag', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Table(
+                columnWidths: const {
+                  0: FlexColumnWidth(1),
+                  1: FlexColumnWidth(2),
+                },
+                children: [
+                  TableRow(children: [
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Item Name:', style: TextStyle(fontWeight: FontWeight.bold))),
+                    Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text(item.itemName)),
+                  ]),
+                  TableRow(children: [
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Category:', style: TextStyle(fontWeight: FontWeight.bold))),
+                    Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text(item.category)),
+                  ]),
+                  TableRow(children: [
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Purity:', style: TextStyle(fontWeight: FontWeight.bold))),
+                    Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text(item.purity)),
+                  ]),
+                  TableRow(children: [
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Weight:', style: TextStyle(fontWeight: FontWeight.bold))),
+                    Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text('${item.weight.toStringAsFixed(3)} g')),
+                  ]),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0F172A),
+              foregroundColor: Colors.white,
+              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            ),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _reprintLabel(item);
+            },
+            icon: const Icon(Icons.print, size: 16),
+            label: const Text('Print Label'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showErrorDialog(String title, String message) {
     showDialog(
       context: context,
@@ -1223,11 +1317,30 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                                         },
                                         cells: [
                                           DataCell(
-                                            Text(
-                                              item.barcode,
-                                              style: const TextStyle(
-                                                fontFamily: 'monospace',
-                                                fontWeight: FontWeight.bold,
+                                            InkWell(
+                                              onTap: () => _showBarcodeDetailsDialog(item),
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFF0F172A),
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    const Icon(Icons.qr_code, color: Colors.amber, size: 14),
+                                                    const SizedBox(width: 6),
+                                                    Text(
+                                                      item.barcode,
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontFamily: 'monospace',
+                                                        fontWeight: FontWeight.bold,
+                                                        fontSize: 13,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
                                               ),
                                             ),
                                           ),
@@ -1239,6 +1352,11 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                                             Row(
                                               mainAxisSize: MainAxisSize.min,
                                               children: [
+                                                IconButton(
+                                                  icon: const Icon(Icons.visibility, size: 18, color: Color(0xFF0F172A)),
+                                                  tooltip: 'View Barcode Details',
+                                                  onPressed: () => _showBarcodeDetailsDialog(item),
+                                                ),
                                                 OutlinedButton(
                                                   style: OutlinedButton.styleFrom(
                                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
