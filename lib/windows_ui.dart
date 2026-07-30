@@ -26,6 +26,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
   final _searchController = TextEditingController();
   List<InventoryItem> _allItems = [];
   List<InventoryItem> _filteredItems = [];
+  Set<String> _selectedBarcodes = {};
   bool _isLoading = true;
 
   // Settings State
@@ -132,6 +133,45 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     _refreshData();
   }
 
+  Future<void> _saveOnly() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final name = _nameController.text.trim();
+    final category = _categoryController.text.trim();
+    final purity = _purityController.text.trim();
+    final weight = double.tryParse(_weightController.text.trim());
+
+    if (weight == null || weight <= 0) {
+      _showErrorDialog('Invalid Weight', 'Please enter a valid positive weight in grams.');
+      return;
+    }
+
+    final barcode = await InventoryDB.generateNextBarcode();
+
+    final item = InventoryItem(
+      barcode: barcode,
+      itemName: name,
+      category: category,
+      purity: purity,
+      weight: weight,
+    );
+
+    try {
+      await InventoryDB.insertItem(item);
+      await _refreshData();
+      _clearForm();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Item "$name" saved to inventory ($barcode).'),
+          backgroundColor: const Color(0xFF0F172A),
+        ),
+      );
+    } catch (e) {
+      _showErrorDialog('Database Error', 'Could not save item to database.');
+    }
+  }
+
   Future<void> _saveAndPrint() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -155,12 +195,18 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
       weight: weight,
     );
 
-    // Flow: Print Label -> If succeeds -> Save to SQLite & Clear form. If fails -> Do NOT save & Allow Retry.
-    await _printAndSaveItem(item);
-  }
+    // 1. ALWAYS SAVE to Database first so data is never lost!
+    try {
+      await InventoryDB.insertItem(item);
+      await _refreshData();
+      _clearForm();
+    } catch (e) {
+      _showErrorDialog('Database Error', 'Could not save item to database.');
+      return;
+    }
 
-  Future<void> _printAndSaveItem(InventoryItem item) async {
-    bool success = await TSPLPrinter.sendTSPLToPrinter(
+    // 2. Attempt TSPL label printing
+    bool printSuccess = await TSPLPrinter.sendTSPLToPrinter(
       item,
       host: _printerIp,
       port: _printerPort,
@@ -168,34 +214,32 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
 
     if (!mounted) return;
 
-    if (success) {
-      try {
-        await InventoryDB.insertItem(item);
-        await _refreshData();
-        _clearForm();
-      } catch (e) {
-        _showErrorDialog('Database Error', 'Could not save item to database.');
-      }
+    if (printSuccess) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Item "$name" saved & label printed ($barcode).'),
+          backgroundColor: Colors.green.shade800,
+        ),
+      );
     } else {
       showDialog(
         context: context,
-        barrierDismissible: false,
         builder: (ctx) => AlertDialog(
           shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
           title: const Row(
             children: [
-              Icon(Icons.print_disabled, color: Colors.red),
+              Icon(Icons.check_circle, color: Colors.green),
               SizedBox(width: 8),
-              Text('Printer Not Connected'),
+              Text('Saved (Printer Disconnected)'),
             ],
           ),
           content: Text(
-            'Could not send label to TSPL printer at IP: $_printerIp Port: $_printerPort.\nItem was NOT saved. Verify printer power and paper, then click Retry.',
+            'Item "$name" ($barcode) was SAVED to inventory database successfully.\n\nHowever, label printing failed because printer is unreachable at IP: $_printerIp Port: $_printerPort.\n\nYou can select this item in the Inventory table to print its label at any time.',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
+              child: const Text('OK / Skip Print'),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
@@ -205,9 +249,9 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
               ),
               onPressed: () {
                 Navigator.of(ctx).pop();
-                _printAndSaveItem(item);
+                _reprintLabel(item);
               },
-              child: const Text('Retry'),
+              child: const Text('Retry Print'),
             ),
           ],
         ),
@@ -256,6 +300,70 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                 _reprintLabel(item);
               },
               child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  Future<void> _printSelectedItems() async {
+    if (_selectedBarcodes.isEmpty) return;
+
+    final selectedItems = _allItems.where((item) => _selectedBarcodes.contains(item.barcode)).toList();
+
+    int successCount = 0;
+    List<InventoryItem> failedItems = [];
+
+    for (var item in selectedItems) {
+      bool ok = await TSPLPrinter.sendTSPLToPrinter(
+        item,
+        host: _printerIp,
+        port: _printerPort,
+      );
+      if (ok) {
+        successCount++;
+      } else {
+        failedItems.add(item);
+      }
+    }
+
+    if (!mounted) return;
+
+    if (failedItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Successfully printed $successCount barcode label(s).'),
+          backgroundColor: Colors.green.shade800,
+        ),
+      );
+      setState(() {
+        _selectedBarcodes.clear();
+      });
+    } else {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+          title: const Row(
+            children: [
+              Icon(Icons.print_disabled, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('Batch Printing Status'),
+            ],
+          ),
+          content: Text(
+            'Printed $successCount label(s).\nFailed to print ${failedItems.length} label(s) (Printer unreachable at IP: $_printerIp Port: $_printerPort).',
+          ),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1E293B),
+                foregroundColor: Colors.white,
+                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+              ),
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('OK'),
             ),
           ],
         ),
@@ -656,6 +764,8 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
 
   @override
   Widget build(BuildContext context) {
+    final isAllSelected = _filteredItems.isNotEmpty && _filteredItems.every((item) => _selectedBarcodes.contains(item.barcode));
+
     return Scaffold(
       backgroundColor: const Color(0xFFE2E8F0),
       appBar: PreferredSize(
@@ -724,7 +834,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
         children: [
           // LEFT PANEL: Register Jewellery
           SizedBox(
-            width: 360,
+            width: 380,
             child: Container(
               color: Colors.white,
               padding: const EdgeInsets.all(20),
@@ -845,24 +955,35 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                     ),
                     const Spacer(),
 
-                    // Action Buttons
+                    // Action Buttons (Clear, Save Only, Save & Print)
                     Row(
                       children: [
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                            side: const BorderSide(color: Color(0xFF64748B)),
+                            foregroundColor: const Color(0xFF334155),
+                          ),
+                          onPressed: _clearForm,
+                          child: const Text('Clear', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                        const SizedBox(width: 8),
                         Expanded(
-                          child: OutlinedButton(
-                            style: OutlinedButton.styleFrom(
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF334155),
+                              foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-                              side: const BorderSide(color: Color(0xFF64748B)),
-                              foregroundColor: const Color(0xFF334155),
                             ),
-                            onPressed: _clearForm,
-                            child: const Text('Clear', style: TextStyle(fontWeight: FontWeight.bold)),
+                            onPressed: _saveOnly,
+                            icon: const Icon(Icons.save, size: 16),
+                            label: const Text('Save Only', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 8),
                         Expanded(
-                          flex: 2,
                           child: ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF0F172A),
@@ -871,8 +992,8 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                               shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
                             ),
                             onPressed: _saveAndPrint,
-                            icon: const Icon(Icons.print, size: 18),
-                            label: const Text('Save & Print', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                            icon: const Icon(Icons.print, size: 16),
+                            label: const Text('Save & Print', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                           ),
                         ),
                       ],
@@ -911,6 +1032,19 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                           ),
                         ),
                         const Spacer(),
+                        if (_selectedBarcodes.isNotEmpty)
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF0F172A),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                            ),
+                            onPressed: _printSelectedItems,
+                            icon: const Icon(Icons.print, size: 16),
+                            label: Text('Print Selected (${_selectedBarcodes.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        if (_selectedBarcodes.isNotEmpty) const SizedBox(width: 12),
                         Text(
                           'Total Items: ${_filteredItems.length}',
                           style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
@@ -966,16 +1100,45 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                                   child: DataTable(
                                     columnSpacing: 24,
                                     headingRowColor: WidgetStateProperty.all(const Color(0xFFF1F5F9)),
-                                    columns: const [
-                                      DataColumn(label: Text('Barcode', style: TextStyle(fontWeight: FontWeight.bold))),
-                                      DataColumn(label: Text('Item Name', style: TextStyle(fontWeight: FontWeight.bold))),
-                                      DataColumn(label: Text('Category', style: TextStyle(fontWeight: FontWeight.bold))),
-                                      DataColumn(label: Text('Purity', style: TextStyle(fontWeight: FontWeight.bold))),
-                                      DataColumn(label: Text('Weight (g)', style: TextStyle(fontWeight: FontWeight.bold))),
-                                      DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
+                                    columns: [
+                                      DataColumn(
+                                        label: Row(
+                                          children: [
+                                            Checkbox(
+                                              value: isAllSelected,
+                                              onChanged: (val) {
+                                                setState(() {
+                                                  if (val == true) {
+                                                    _selectedBarcodes = _filteredItems.map((i) => i.barcode).toSet();
+                                                  } else {
+                                                    _selectedBarcodes.clear();
+                                                  }
+                                                });
+                                              },
+                                            ),
+                                            const Text('Barcode', style: TextStyle(fontWeight: FontWeight.bold)),
+                                          ],
+                                        ),
+                                      ),
+                                      const DataColumn(label: Text('Item Name', style: TextStyle(fontWeight: FontWeight.bold))),
+                                      const DataColumn(label: Text('Category', style: TextStyle(fontWeight: FontWeight.bold))),
+                                      const DataColumn(label: Text('Purity', style: TextStyle(fontWeight: FontWeight.bold))),
+                                      const DataColumn(label: Text('Weight (g)', style: TextStyle(fontWeight: FontWeight.bold))),
+                                      const DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
                                     ],
                                     rows: _filteredItems.map((item) {
+                                      final isSelected = _selectedBarcodes.contains(item.barcode);
                                       return DataRow(
+                                        selected: isSelected,
+                                        onSelectChanged: (selected) {
+                                          setState(() {
+                                            if (selected == true) {
+                                              _selectedBarcodes.add(item.barcode);
+                                            } else {
+                                              _selectedBarcodes.remove(item.barcode);
+                                            }
+                                          });
+                                        },
                                         cells: [
                                           DataCell(
                                             Text(
