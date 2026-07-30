@@ -44,10 +44,16 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
   // In-Memory Temporary List
   final List<ScannedPosItem> _scannedItems = [];
 
-  // Settings (Desktop IP saved locally in shared_preferences)
+  // Settings & Connection State
   String _desktopIp = '192.168.1.25';
   String _printerIp = '192.168.1.200';
   int _printerPort = 9100;
+  String _terminalName = 'Android HandPOS 1';
+  String _terminalId = 'POS-01';
+
+  bool _isConnectedToDesktop = false;
+  String _connectionStatusText = 'Checking Connection...';
+  Timer? _pingTimer;
 
   // Scanner Hardware Focus
   final FocusNode _laserFocusNode = FocusNode();
@@ -59,6 +65,18 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
   void initState() {
     super.initState();
     _loadSettings();
+    // Start periodic background connectivity heartbeat ping every 6 seconds
+    _pingTimer = Timer.periodic(const Duration(seconds: 6), (_) {
+      _sendConnectivityPing();
+    });
+  }
+
+  @override
+  void dispose() {
+    _pingTimer?.cancel();
+    _laserFocusNode.dispose();
+    _laserInputController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSettings() async {
@@ -68,29 +86,68 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
         _desktopIp = prefs.getString('android_desktop_ip') ?? '192.168.1.25';
         _printerIp = prefs.getString('android_printer_ip') ?? '192.168.1.200';
         _printerPort = prefs.getInt('android_printer_port') ?? 9100;
+        _terminalName = prefs.getString('android_terminal_name') ?? 'Android HandPOS 1';
+        _terminalId = prefs.getString('android_terminal_id') ?? 'POS-${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}';
       });
+      _sendConnectivityPing();
     } catch (_) {}
   }
 
-  Future<void> _saveSettings(String desktopIp, String printerIp, int port) async {
+  Future<void> _saveSettings(String desktopIp, String printerIp, int port, String terminalName) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('android_desktop_ip', desktopIp);
       await prefs.setString('android_printer_ip', printerIp);
       await prefs.setInt('android_printer_port', port);
+      await prefs.setString('android_terminal_name', terminalName);
       setState(() {
         _desktopIp = desktopIp;
         _printerIp = printerIp;
         _printerPort = port;
+        _terminalName = terminalName;
       });
+      _sendConnectivityPing();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Settings Saved')),
+          const SnackBar(content: Text('Settings Saved & Synced')),
         );
       }
     } catch (e) {
       _showSimpleDialog('Error', e.toString());
     }
+  }
+
+  // --- CONNECTIVITY SYNC & PING ---
+  Future<bool> _sendConnectivityPing() async {
+    final url = Uri.parse('http://$_desktopIp:8080/ping');
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'id': _terminalId,
+          'name': _terminalName,
+        }),
+      ).timeout(const Duration(seconds: 3));
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          setState(() {
+            _isConnectedToDesktop = true;
+            _connectionStatusText = 'Connected to Workstation ($_desktopIp:8080)';
+          });
+        }
+        return true;
+      }
+    } catch (_) {}
+
+    if (mounted) {
+      setState(() {
+        _isConnectedToDesktop = false;
+        _connectionStatusText = 'Not Connected to Desktop ($_desktopIp)';
+      });
+    }
+    return false;
   }
 
   // --- SCANNING & LOOKUP FLOW ---
@@ -152,6 +209,8 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
         final item = ScannedPosItem.fromJson(data);
         setState(() {
           _scannedItems.add(item);
+          _isConnectedToDesktop = true;
+          _connectionStatusText = 'Connected to Workstation ($_desktopIp:8080)';
         });
       } else if (response.statusCode == 404) {
         _showSimpleDialog('Item Not Found', 'The item barcode $barcode was not found in inventory.');
@@ -160,12 +219,15 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       }
     } on TimeoutException {
       if (!mounted) return;
+      setState(() => _isConnectedToDesktop = false);
       _showSimpleDialog('Desktop Not Reachable', 'HTTP connection timed out (Max 3s). Ensure Desktop app is running.');
     } on SocketException {
       if (!mounted) return;
+      setState(() => _isConnectedToDesktop = false);
       _showSimpleDialog('Check WiFi Connection', 'Could not reach Desktop at http://$_desktopIp:8080. Verify WiFi network connection.');
     } catch (e) {
       if (!mounted) return;
+      setState(() => _isConnectedToDesktop = false);
       _showSimpleDialog('Desktop Application Not Running', 'Could not connect to Desktop server at http://$_desktopIp:8080');
     }
   }
@@ -400,11 +462,113 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     }
   }
 
-  // --- SETTINGS & CONNECTION TEST ---
+  // --- CONNECTIVITY GUIDE & PAIRING HELPER DIALOG ---
+  void _openConnectivityGuideDialog() {
+    final desktopIpCtrl = TextEditingController(text: _desktopIp);
+    final terminalNameCtrl = TextEditingController(text: _terminalName);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+        title: const Row(
+          children: [
+            Icon(Icons.wifi, color: Colors.black),
+            SizedBox(width: 8),
+            Text('Connect to Desktop Workstation', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: SizedBox(
+            width: 360,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  color: const Color(0xFFF1F5F9),
+                  padding: const EdgeInsets.all(12),
+                  child: const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Step 1: WiFi Connection', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                      Text('Ensure this Android device and Windows PC are connected to the SAME WiFi network.', style: TextStyle(fontSize: 12)),
+                      SizedBox(height: 8),
+                      Text('Step 2: Copy Desktop IP', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                      Text('Look at the top bar of your Windows computer screen for the HTTP Server IP (e.g. 192.168.1.25).', style: TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: desktopIpCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Desktop Workstation IP *',
+                    hintText: 'e.g. 192.168.1.25',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: terminalNameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Terminal Device Name',
+                    hintText: 'e.g. Counter 1 HandPOS',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.black,
+              foregroundColor: Colors.white,
+              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            ),
+            onPressed: () async {
+              final newIp = desktopIpCtrl.text.trim();
+              final newName = terminalNameCtrl.text.trim().isEmpty ? 'Android HandPOS' : terminalNameCtrl.text.trim();
+              Navigator.of(ctx).pop();
+
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString('android_desktop_ip', newIp);
+              await prefs.setString('android_terminal_name', newName);
+
+              setState(() {
+                _desktopIp = newIp;
+                _terminalName = newName;
+              });
+
+              bool connected = await _sendConnectivityPing();
+
+              if (!mounted) return;
+              if (connected) {
+                _showSimpleDialog('Connection Successful', 'Connected and synced to Desktop Workstation at $newIp:8080');
+              } else {
+                _showSimpleDialog('Connection Failed', 'Could not reach Desktop at http://$newIp:8080.\nPlease verify Desktop IP and WiFi connection.');
+              }
+            },
+            icon: const Icon(Icons.sync, size: 18),
+            label: const Text('Connect & Sync Now', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Settings Dialog
   void _openSettingsDialog() {
     final desktopIpCtrl = TextEditingController(text: _desktopIp);
     final printerIpCtrl = TextEditingController(text: _printerIp);
     final printerPortCtrl = TextEditingController(text: _printerPort.toString());
+    final terminalNameCtrl = TextEditingController(text: _terminalName);
 
     showDialog(
       context: context,
@@ -439,6 +603,15 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                 decoration: const InputDecoration(
                   labelText: 'Receipt Printer Port',
                   hintText: '9100',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: terminalNameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Terminal Device Name',
+                  hintText: 'Android HandPOS 1',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -486,7 +659,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
             onPressed: () {
               final port = int.tryParse(printerPortCtrl.text.trim()) ?? 9100;
               Navigator.of(ctx).pop();
-              _saveSettings(desktopIpCtrl.text.trim(), printerIpCtrl.text.trim(), port);
+              _saveSettings(desktopIpCtrl.text.trim(), printerIpCtrl.text.trim(), port, terminalNameCtrl.text.trim());
             },
             child: const Text('Save'),
           ),
@@ -540,6 +713,43 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       body: SafeArea(
         child: Column(
           children: [
+            // Top Connection Status Banner
+            GestureDetector(
+              onTap: _openConnectivityGuideDialog,
+              child: Container(
+                color: _isConnectedToDesktop ? const Color(0xFF065F46) : const Color(0xFF991B1B),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    Icon(
+                      _isConnectedToDesktop ? Icons.check_circle : Icons.wifi_off,
+                      color: Colors.white,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _connectionStatusText,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.white),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                      child: Text(
+                        _isConnectedToDesktop ? 'SYNCED' : 'GUIDE & SYNC',
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
             // Hidden Hardware Laser Scanner Text Receiver
             Opacity(
               opacity: 0,

@@ -740,6 +740,82 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     );
   }
 
+  void _showConnectedTerminalsDialog() {
+    final terminals = DesktopHttpServer.getConnectedTerminals();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+        title: Row(
+          children: [
+            const Icon(Icons.phonelink, color: Color(0xFF1E293B)),
+            const SizedBox(width: 8),
+            Text('Paired POS Terminals (${terminals.where((t) => t.isOnline).length} Active)'),
+          ],
+        ),
+        content: SizedBox(
+          width: 500,
+          child: terminals.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: Text(
+                      'No POS Terminals connected yet.\nConnect Android HandPOS devices using Desktop IP: ${DesktopHttpServer.serverIp}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: terminals.length,
+                  separatorBuilder: (c, i) => const Divider(height: 1),
+                  itemBuilder: (c, i) {
+                    final t = terminals[i];
+                    return ListTile(
+                      dense: true,
+                      leading: Icon(
+                        Icons.circle,
+                        color: t.isOnline ? Colors.green : Colors.grey,
+                        size: 14,
+                      ),
+                      title: Text(
+                        t.name,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text('IP: ${t.ip}  |  ID: ${t.id}'),
+                      trailing: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        color: t.isOnline ? Colors.green.shade100 : Colors.grey.shade200,
+                        child: Text(
+                          t.isOnline ? 'ONLINE' : 'OFFLINE',
+                          style: TextStyle(
+                            color: t.isOnline ? Colors.green.shade900 : Colors.grey.shade700,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E293B),
+              foregroundColor: Colors.white,
+              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showErrorDialog(String title, String message) {
     showDialog(
       context: context,
@@ -802,6 +878,12 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                 ),
               ),
               const Spacer(),
+              TextButton.icon(
+                onPressed: _showConnectedTerminalsDialog,
+                icon: const Icon(Icons.phonelink, color: Colors.white, size: 16),
+                label: Text('Terminals (${DesktopHttpServer.activeOnlineTerminalsCount})', style: const TextStyle(color: Colors.white, fontSize: 13)),
+              ),
+              const SizedBox(width: 4),
               TextButton.icon(
                 onPressed: _backupDatabase,
                 icon: const Icon(Icons.backup, color: Colors.white, size: 16),
