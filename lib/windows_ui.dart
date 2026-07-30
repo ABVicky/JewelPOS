@@ -821,98 +821,94 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF222222),
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-        title: const Text(
-          'Barcode Label Preview',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+        title: Row(
+          children: [
+            const Icon(Icons.qr_code_2, color: Color(0xFF0F172A), size: 24),
+            const SizedBox(width: 8),
+            Text('Barcode Details (${item.barcode})'),
+          ],
         ),
         content: SizedBox(
-          width: 340,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-            color: const Color(0xFF222222),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Line 1: Item Name
-                Text(
-                  item.itemName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: 'monospace',
-                  ),
+          width: 380,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border.all(color: const Color(0xFFCBD5E1)),
                 ),
-                const SizedBox(height: 24),
-
-                // Line 2: Weight & Purity
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                child: Column(
                   children: [
-                    Text(
-                      'Wt:${item.weight.toStringAsFixed(3)}g',
+                    BarcodeWidget(
+                      barcode: Barcode.code128(),
+                      data: item.barcode,
+                      width: 290,
+                      height: 85,
+                      drawText: true,
                       style: const TextStyle(
-                        color: Colors.white,
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                         fontFamily: 'monospace',
+                        color: Color(0xFF0F172A),
                       ),
                     ),
-                    Text(
-                      item.purity,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        fontFamily: 'monospace',
-                      ),
+                    const SizedBox(height: 12),
+                    BarcodeWidget(
+                      barcode: Barcode.qrCode(),
+                      data: item.barcode,
+                      width: 90,
+                      height: 90,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Scannable Barcode Tag — Point HandPOS Laser or Camera at Screen',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
-                const SizedBox(height: 24),
-
-                // Line 3: Code128 Barcode Graphic
-                Center(
-                  child: BarcodeWidget(
-                    barcode: Barcode.code128(),
-                    data: item.barcode,
-                    width: 260,
-                    height: 65,
-                    drawText: false,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Line 4: Human Readable Barcode String
-                Center(
-                  child: Text(
-                    item.barcode,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      fontFamily: 'monospace',
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 16),
+              Table(
+                columnWidths: const {
+                  0: FlexColumnWidth(1),
+                  1: FlexColumnWidth(2),
+                },
+                children: [
+                  TableRow(children: [
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Item Name:', style: TextStyle(fontWeight: FontWeight.bold))),
+                    Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text(item.itemName)),
+                  ]),
+                  TableRow(children: [
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Category:', style: TextStyle(fontWeight: FontWeight.bold))),
+                    Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text(item.category)),
+                  ]),
+                  TableRow(children: [
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Purity:', style: TextStyle(fontWeight: FontWeight.bold))),
+                    Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text(item.purity)),
+                  ]),
+                  TableRow(children: [
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Weight:', style: TextStyle(fontWeight: FontWeight.bold))),
+                    Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text('${item.weight.toStringAsFixed(3)} g')),
+                  ]),
+                ],
+              ),
+            ],
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Close', style: TextStyle(color: Colors.grey)),
+            child: const Text('Close'),
           ),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.black,
+              backgroundColor: const Color(0xFF0F172A),
+              foregroundColor: Colors.white,
               shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
             ),
             onPressed: () {
@@ -920,7 +916,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
               _reprintLabel(item);
             },
             icon: const Icon(Icons.print, size: 16),
-            label: const Text('Print Label', style: TextStyle(fontWeight: FontWeight.bold)),
+            label: const Text('Print Label'),
           ),
         ],
       ),

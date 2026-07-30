@@ -425,7 +425,8 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
   }
 
   // --- ESC/POS RECEIPT PRINTING (BUILT-IN 58MM THERMAL PRINTER FOR SMART POS 1008) ---
-  List<int> _generateEscPosBytes() {
+  List<int> _generateEscPosBytes({List<ScannedPosItem>? customList}) {
+    final itemsToPrint = customList ?? _scannedItems;
     final bytes = <int>[];
 
     // Initialize ESC/POS
@@ -445,7 +446,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     bytes.addAll(utf8.encode("--------------------------------\n"));
 
     double totalWeight = 0.0;
-    for (var item in _scannedItems) {
+    for (var item in itemsToPrint) {
       totalWeight += item.weight;
       final bcStr = item.barcode.padRight(12).substring(0, 12);
       final itemStr = item.itemName.padRight(10).substring(0, 10);
@@ -454,7 +455,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     }
 
     bytes.addAll(utf8.encode("--------------------------------\n"));
-    final countStr = _scannedItems.length.toString();
+    final countStr = itemsToPrint.length.toString();
     final totWtStr = "${totalWeight.toStringAsFixed(3)} g";
 
     final countPad = ' ' * (32 - "Items".length - countStr.length);
@@ -474,51 +475,21 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     return bytes;
   }
 
-  String _generatePlainTextReceipt() {
-    final buffer = StringBuffer();
-    buffer.writeln('================================');
-    buffer.writeln('           JEWEL POS            ');
-    buffer.writeln('================================');
-    buffer.writeln('Barcode      Item      Weight   ');
-    buffer.writeln('--------------------------------');
-
-    double totalWeight = 0.0;
-    for (var item in _scannedItems) {
-      totalWeight += item.weight;
-      final bcStr = item.barcode.padRight(12).substring(0, 12);
-      final itemStr = item.itemName.padRight(10).substring(0, 10);
-      final wtStr = item.weight.toStringAsFixed(3).padLeft(8);
-      buffer.writeln('$bcStr$itemStr$wtStr');
-    }
-
-    buffer.writeln('--------------------------------');
-    buffer.writeln('Total Items: ${_scannedItems.length}');
-    buffer.writeln('Total Weight: ${totalWeight.toStringAsFixed(3)} g');
-    buffer.writeln('================================');
-    buffer.writeln('           Thank You            \n\n');
-    return buffer.toString();
-  }
-
   static const _printerChannel = MethodChannel('jewel_pos/printer');
 
-  Future<bool> _sendToBuiltInPrinter() async {
+  Future<bool> _sendToBuiltInPrinter({List<ScannedPosItem>? customList}) async {
     if (kIsWeb) return true;
 
-    final bytes = Uint8List.fromList(_generateEscPosBytes());
-    final plainText = _generatePlainTextReceipt();
+    final bytes = Uint8List.fromList(_generateEscPosBytes(customList: customList));
 
-    // 1. Invoke Native Android MethodChannel (Serial & Native Port scanner & System Print)
+    // 1. Invoke Native Android MethodChannel (Serial & Native Port scanner)
     try {
-      final String? result = await _printerChannel.invokeMethod<String>('printBytes', {
+      final bool? result = await _printerChannel.invokeMethod<bool>('printBytes', {
         'bytes': bytes,
         'ip': _printerIp,
         'port': _printerPort,
-        'text': plainText,
       });
-      if (result != null && result.startsWith('SUCCESS')) {
-        debugPrint('Printer success status: $result');
-        return true;
-      }
+      if (result == true) return true;
     } catch (e) {
       debugPrint('Native printer MethodChannel exception: $e');
     }
@@ -588,11 +559,18 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
         builder: (ctx) => AlertDialog(
           shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
           title: const Text('Built-in Printer Error', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-          content: const Text('Could not send print job to Smart POS 1008 internal thermal printer.\nPlease verify 58mm paper roll is installed.'),
+          content: const Text('Could not print receipt to Smart POS 1008 internal thermal printer.\n\nPlease check printer paper roll or select a custom printer port in Settings.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
               child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            OutlinedButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _openSettingsDialog();
+              },
+              child: const Text('Open Settings'),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
@@ -725,7 +703,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     );
   }
 
-  // Settings Dialog
+  // Settings Dialog with Built-in Printer Diagnostics Test
   void _openSettingsDialog() {
     final desktopIpCtrl = TextEditingController(text: _desktopIp);
     final printerIpCtrl = TextEditingController(text: _printerIp);
@@ -765,7 +743,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                   controller: printerPortCtrl,
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
-                    labelText: 'Internal Printer Port',
+                    labelText: 'Internal Printer Port (9100 / 9108 / 8000 / 8888 / 6001)',
                     hintText: '9100',
                     border: OutlineInputBorder(),
                   ),
@@ -785,6 +763,33 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                   subtitle: const Text('Automatically print receipt on built-in printer upon scanning tag', style: TextStyle(fontSize: 11)),
                   value: tempAutoPrint,
                   onChanged: (val) => setDlgState(() => tempAutoPrint = val),
+                ),
+                const SizedBox(height: 12),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F172A),
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(44),
+                    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                  ),
+                  onPressed: () async {
+                    final testItem = ScannedPosItem(
+                      barcode: 'TEST1008',
+                      itemName: 'Printer Test',
+                      category: 'Test',
+                      purity: '22K',
+                      weight: 1.000,
+                    );
+                    final testOk = await _sendToBuiltInPrinter(customList: [testItem]);
+                    if (!ctx.mounted) return;
+                    if (testOk) {
+                      _showSimpleDialog('Test Print Successful', 'Receipt output sent to built-in thermal printer.');
+                    } else {
+                      _showSimpleDialog('Test Print Failed', 'Could not output test print. Try changing printer port to 9108, 8000, or 8888.');
+                    }
+                  },
+                  icon: const Icon(Icons.print, size: 18),
+                  label: const Text('Test Built-in Thermal Printer', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ],
             ),

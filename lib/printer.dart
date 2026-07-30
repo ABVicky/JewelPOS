@@ -8,32 +8,15 @@ class TSPLPrinter {
   /// Build TSPL command string for HPRT HT800 label printer (38mm x 25mm)
   static String buildTSPLCommand(InventoryItem item) {
     final buffer = StringBuffer();
-    buffer.writeln('SIZE 38 mm,25 mm');
-    buffer.writeln('GAP 2 mm,0 mm');
-    buffer.writeln('SPEED 3');
-    buffer.writeln('DENSITY 10');
+    buffer.writeln('SIZE 38 mm, 25 mm');
+    buffer.writeln('GAP 2 mm, 0 mm');
     buffer.writeln('DIRECTION 1');
     buffer.writeln('CLS');
-
-    // Handle max length item name safely (truncate if > 22 chars to fit 304 dots printable area)
-    String safeName = item.itemName.trim();
-    if (safeName.length > 22) {
-      safeName = safeName.substring(0, 22).trim();
-    }
-
-    // Format weight strictly to 3 decimal places (e.g. Wt:14.250g)
-    final weightStr = 'Wt:${item.weight.toStringAsFixed(3)}g';
-
-    // Format purity (e.g. 22K)
-    final purityStr = item.purity.trim();
-
-    buffer.writeln('TEXT 20,15,"3",0,1,1,"$safeName"');
-    buffer.writeln('TEXT 20,50,"2",0,1,1,"$weightStr"');
-    buffer.writeln('TEXT 170,50,"3",0,1,1,"$purityStr"');
-    buffer.writeln('BARCODE 20,85,"128",65,0,0,2,4,"${item.barcode}"');
-    buffer.writeln('TEXT 40,165,"2",0,1,1,"${item.barcode}"');
+    buffer.writeln('TEXT 15,10,"3",0,1,1,"${item.itemName}"');
+    buffer.writeln('TEXT 15,40,"2",0,1,1,"Cat: ${item.category}  Pur: ${item.purity}"');
+    buffer.writeln('TEXT 15,65,"2",0,1,1,"Wt: ${item.weight.toStringAsFixed(2)} g"');
+    buffer.writeln('BARCODE 15,95,"128",45,1,0,2,2,"${item.barcode}"');
     buffer.writeln('PRINT 1,1');
-
     return buffer.toString();
   }
 
