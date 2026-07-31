@@ -60,7 +60,7 @@ class TSPLPrinter {
     return pdf.save();
   }
 
-  /// Print label directly to connected Windows printer in given format and layout
+  /// Directly opens Windows Native Printing Window with 38mm x 25mm setup
   static Future<bool> sendTSPLToPrinter(InventoryItem item) async {
     if (kIsWeb) {
       debugPrint('Label printed (Web Simulation)');
@@ -69,40 +69,18 @@ class TSPLPrinter {
 
     try {
       final pdfBytes = await generateLabelPdfBytes(item);
-      final printers = await Printing.listPrinters();
-
-      Printer? targetPrinter;
-      if (printers.isNotEmpty) {
-        targetPrinter = printers.firstWhere(
-          (p) => p.isDefault,
-          orElse: () => printers.first,
-        );
-      }
-
-      if (targetPrinter != null) {
-        return await Printing.directPrintPdf(
-          printer: targetPrinter,
-          onLayout: (PdfPageFormat format) async => pdfBytes,
-          format: PdfPageFormat(
-            38 * PdfPageFormat.mm,
-            25 * PdfPageFormat.mm,
-            marginAll: 1.5 * PdfPageFormat.mm,
-          ),
-        );
-      } else {
-        await Printing.layoutPdf(
-          onLayout: (PdfPageFormat format) async => pdfBytes,
-          name: 'JewelPOS_Label_${item.barcode}',
-          format: PdfPageFormat(
-            38 * PdfPageFormat.mm,
-            25 * PdfPageFormat.mm,
-            marginAll: 1.5 * PdfPageFormat.mm,
-          ),
-        );
-        return true;
-      }
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdfBytes,
+        name: 'JewelPOS_Label_${item.barcode}',
+        format: PdfPageFormat(
+          38 * PdfPageFormat.mm,
+          25 * PdfPageFormat.mm,
+          marginAll: 1.5 * PdfPageFormat.mm,
+        ),
+      );
+      return true;
     } catch (e) {
-      debugPrint('Direct printer exception: $e');
+      debugPrint('Printing layout exception: $e');
       return false;
     }
   }
