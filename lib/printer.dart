@@ -19,7 +19,27 @@ class TSPLPrinter {
     return buffer.toString();
   }
 
-  /// Sends raw TSPL commands over USB (Windows Spool/COM Port) or TCP Socket
+  /// Automatically fetch list of all installed Windows USB printers
+  static Future<List<String>> getInstalledWindowsPrinters() async {
+    if (kIsWeb || !Platform.isWindows) return [];
+    try {
+      final result = await Process.run('powershell', [
+        '-Command',
+        'Get-Printer | Select-Object -ExpandProperty Name'
+      ]);
+      if (result.exitCode == 0) {
+        final lines = (result.stdout as String)
+            .split('\n')
+            .map((l) => l.trim())
+            .where((l) => l.isNotEmpty)
+            .toList();
+        return lines;
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  /// Sends raw TSPL commands to Windows Installed Printer Driver by Name, USB COM Port, or TCP Socket
   static Future<bool> sendTSPLToPrinter(
     InventoryItem item, {
     required String host,
@@ -30,34 +50,72 @@ class TSPLPrinter {
       debugPrint('TSPL Label generated (Web Simulation):\n${buildTSPLCommand(item)}');
       return true;
     }
+
     final tsplStr = buildTSPLCommand(item);
     final bytes = utf8.encode(tsplStr);
 
-    // 1. Try Windows Direct USB / COM Serial Ports for HPRT HT800
     if (Platform.isWindows) {
-      final List<String> usbTargets = [];
+      // 1. Try Named Windows Printer Driver (e.g. "HPRT HT800", "HPRT", "HT800")
+      final List<String> targetNames = [];
       if (usbPortName != null && usbPortName.trim().isNotEmpty) {
-        usbTargets.add(usbPortName.trim());
+        targetNames.add(usbPortName.trim());
       }
-      usbTargets.addAll([
-        'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8',
-        '\\\\.\\COM1', '\\\\.\\COM2', '\\\\.\\COM3', '\\\\.\\COM4', '\\\\.\\COM5',
-        'LPT1', 'PRN'
+      
+      // Auto-detect installed printers if targetNames is empty or generic
+      try {
+        final installedPrinters = await getInstalledWindowsPrinters();
+        for (var p in installedPrinters) {
+          if (!targetNames.contains(p)) {
+            // Prioritize HPRT or thermal printer names
+            if (p.toLowerCase().contains('hprt') || p.toLowerCase().contains('label') || p.toLowerCase().contains('pos') || p.toLowerCase().contains('tsc')) {
+              targetNames.insert(0, p);
+            } else {
+              targetNames.add(p);
+            }
+          }
+        }
+      } catch (_) {}
+
+      // Add common COM / LPT serial ports
+      targetNames.addAll([
+        'COM3', 'COM1', 'COM2', 'COM4', 'COM5', 'COM6', 'LPT1', 'PRN'
       ]);
 
-      for (var target in usbTargets) {
+      for (var target in targetNames) {
         try {
-          final tempFile = File('${Directory.systemTemp.path}\\label_print.tspl');
+          final tempFile = File('${Directory.systemTemp.path}\\label_${DateTime.now().millisecondsSinceEpoch}.tspl');
           await tempFile.writeAsBytes(bytes);
-          final result = await Process.run('cmd.exe', ['/c', 'copy', '/b', tempFile.path, target]);
-          if (result.exitCode == 0) {
+
+          // Attempt PowerShell Out-Printer by Installed Printer Name
+          final psResult = await Process.run('powershell', [
+            '-Command',
+            "Get-Content '${tempFile.path}' | Out-Printer -Name '$target'"
+          ]);
+
+          if (psResult.exitCode == 0) {
+            try { await tempFile.delete(); } catch (_) {}
+            return true;
+          }
+
+          // Attempt Windows Raw Copy to Printer Spooler Name or COM port
+          final rawResult = await Process.run('cmd.exe', [
+            '/c',
+            'copy',
+            '/b',
+            tempFile.path,
+            target.startsWith('COM') || target.startsWith('LPT') ? target : "\\\\localhost\\$target"
+          ]);
+
+          try { await tempFile.delete(); } catch (_) {}
+
+          if (rawResult.exitCode == 0) {
             return true;
           }
         } catch (_) {}
       }
     }
 
-    // 2. Try TCP Socket Connection (Ethernet / WiFi / USB Virtual IP)
+    // 2. Try Network TCP Socket Connection (Ethernet / WiFi / USB Virtual IP)
     try {
       final socket = await Socket.connect(host, port, timeout: const Duration(seconds: 2));
       socket.add(bytes);
