@@ -24,31 +24,37 @@ class TSPLPrinter {
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
-              // Row 1: Item Name & Category
+              // Row 1: Item Name & Category (Bold & Clear)
               pw.Text(
                 '${item.itemName} (${item.category})',
                 style: pw.TextStyle(
-                  fontSize: 8,
+                  fontSize: 9.5,
                   fontWeight: pw.FontWeight.bold,
                 ),
                 maxLines: 1,
               ),
-              // Row 2: Purity & Weight
+              // Row 2: Purity & Weight (Bold & Clear)
               pw.Text(
                 'Pur: ${item.purity}  Wt: ${item.weight.toStringAsFixed(4)} g',
-                style: const pw.TextStyle(fontSize: 7),
+                style: pw.TextStyle(
+                  fontSize: 8.5,
+                  fontWeight: pw.FontWeight.bold,
+                ),
                 maxLines: 1,
               ),
               pw.SizedBox(height: 1),
-              // Row 3-4: Code128 Barcode & Barcode ID Text
+              // Row 3-4: Code128 Barcode & Barcode ID Text (Bold & Clear)
               pw.Center(
                 child: pw.BarcodeWidget(
                   barcode: pw.Barcode.code128(),
                   data: item.barcode,
-                  width: 95,
-                  height: 24,
+                  width: 100,
+                  height: 26,
                   drawText: true,
-                  textStyle: const pw.TextStyle(fontSize: 6),
+                  textStyle: pw.TextStyle(
+                    fontSize: 7.5,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
                 ),
               ),
             ],
