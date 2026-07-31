@@ -286,9 +286,40 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
         ),
       );
     } else {
-      _showErrorDialog(
-        'Printer Disconnected',
-        'Could not connect to TSPL printer at IP: $_printerIp Port: $_printerPort.\nPlease verify printer connection or update Printer IP in Settings.',
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+          title: const Text('Printer Connection Error', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+          content: Text(
+            'Could not send direct print job to "$_printerUsbPort".\n\nYou can print directly via Windows System Print Dialog (Win + P) below or verify printer name in Settings.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            OutlinedButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                TSPLPrinter.layoutPdf(item);
+              },
+              child: const Text('Open Windows Print Dialog (Win + P)', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0F172A),
+                foregroundColor: Colors.white,
+                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+              ),
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _reprintLabel(item);
+              },
+              child: const Text('Retry Direct Print'),
+            ),
+          ],
+        ),
       );
     }
   }

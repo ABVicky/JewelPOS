@@ -2,10 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'db.dart';
 
 class TSPLPrinter {
-  /// Build TSPL command string for HPRT HT800 label printer (38mm x 25mm)
+  /// Build TSPL command string for TSPL Direct Raw printers (38mm x 25mm)
   static String buildTSPLCommand(InventoryItem item) {
     final buffer = StringBuffer();
     buffer.writeln('SIZE 38 mm, 25 mm');
@@ -19,9 +22,78 @@ class TSPLPrinter {
     return buffer.toString();
   }
 
+  /// Build 38mm x 25mm Label Document Bytes for Windows Driver Printing
+  static Future<Uint8List> generateLabelPdfBytes(InventoryItem item) async {
+    final pdf = pw.Document();
+
+    final pageFormat = PdfPageFormat(
+      38 * PdfPageFormat.mm,
+      25 * PdfPageFormat.mm,
+      marginAll: 1.5 * PdfPageFormat.mm,
+    );
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: pageFormat,
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text(
+                '${item.itemName} (${item.category})',
+                style: pw.TextStyle(
+                  fontSize: 8,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+                maxLines: 1,
+              ),
+              pw.Text(
+                'Pur: ${item.purity}  Wt: ${item.weight.toStringAsFixed(4)} g',
+                style: const pw.TextStyle(fontSize: 7),
+                maxLines: 1,
+              ),
+              pw.SizedBox(height: 1),
+              pw.Center(
+                child: pw.BarcodeWidget(
+                  barcode: pw.Barcode.code128(),
+                  data: item.barcode,
+                  width: 95,
+                  height: 24,
+                  drawText: true,
+                  textStyle: const pw.TextStyle(fontSize: 6),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    return pdf.save();
+  }
+
+  /// Opens native Windows Print Dialog (Win + P equivalent) for label printing
+  static Future<void> layoutPdf(InventoryItem item) async {
+    final bytes = await generateLabelPdfBytes(item);
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => bytes,
+      name: 'JewelPOS_Label_${item.barcode}',
+      format: PdfPageFormat(
+        38 * PdfPageFormat.mm,
+        25 * PdfPageFormat.mm,
+        marginAll: 1.5 * PdfPageFormat.mm,
+      ),
+    );
+  }
+
   /// Automatically fetch list of all installed Windows USB printers
   static Future<List<String>> getInstalledWindowsPrinters() async {
     if (kIsWeb || !Platform.isWindows) return [];
+    try {
+      final printers = await Printing.listPrinters();
+      return printers.map((p) => p.name).toList();
+    } catch (_) {}
     try {
       final result = await Process.run('powershell', [
         '-Command',
@@ -39,7 +111,7 @@ class TSPLPrinter {
     return [];
   }
 
-  /// Sends raw TSPL commands to Windows Installed Printer Driver via Win32 RAW Spooler, USB COM Port, or TCP Socket
+  /// Sends label print job to Windows Installed Printer Driver (HPRT HT800) or TCP Socket
   static Future<bool> sendTSPLToPrinter(
     InventoryItem item, {
     required String host,
@@ -52,33 +124,57 @@ class TSPLPrinter {
     }
 
     final tsplStr = buildTSPLCommand(item);
-    final bytes = utf8.encode(tsplStr);
+    final rawBytes = utf8.encode(tsplStr);
 
     if (Platform.isWindows) {
+      // 1. Primary: Native Windows C++ Printer Driver Integration (Works on HPRT HT800 Driver)
+      try {
+        final pdfBytes = await generateLabelPdfBytes(item);
+        final printers = await Printing.listPrinters();
+        Printer? targetPrinter;
+
+        if (usbPortName != null && usbPortName.trim().isNotEmpty) {
+          final query = usbPortName.trim().toLowerCase();
+          for (var p in printers) {
+            if (p.name.toLowerCase().contains(query)) {
+              targetPrinter = p;
+              break;
+            }
+          }
+        }
+
+        if (targetPrinter == null && printers.isNotEmpty) {
+          for (var p in printers) {
+            final lower = p.name.toLowerCase();
+            if (lower.contains('hprt') || lower.contains('label') || lower.contains('pos') || lower.contains('tsc') || lower.contains('barcode')) {
+              targetPrinter = p;
+              break;
+            }
+          }
+          targetPrinter ??= printers.firstWhere((p) => p.isDefault, orElse: () => printers.first);
+        }
+
+        if (targetPrinter != null) {
+          final bool printed = await Printing.directPrintPdf(
+            printer: targetPrinter,
+            onLayout: (PdfPageFormat format) async => pdfBytes,
+            format: PdfPageFormat(
+              38 * PdfPageFormat.mm,
+              25 * PdfPageFormat.mm,
+              marginAll: 1.5 * PdfPageFormat.mm,
+            ),
+          );
+          if (printed) return true;
+        }
+      } catch (e) {
+        debugPrint('Windows Printing.directPrintPdf failed: $e');
+      }
+
+      // 2. Secondary: Raw Serial / Spool Targets for direct TSPL printers
       final List<String> targetNames = [];
       if (usbPortName != null && usbPortName.trim().isNotEmpty) {
         targetNames.add(usbPortName.trim());
       }
-
-      // Auto-detect installed Windows printers if target is generic
-      try {
-        final installedPrinters = await getInstalledWindowsPrinters();
-        for (var p in installedPrinters) {
-          if (!targetNames.contains(p)) {
-            if (p.toLowerCase().contains('hprt') ||
-                p.toLowerCase().contains('label') ||
-                p.toLowerCase().contains('pos') ||
-                p.toLowerCase().contains('tsc') ||
-                p.toLowerCase().contains('barcode')) {
-              targetNames.insert(0, p);
-            } else {
-              targetNames.add(p);
-            }
-          }
-        }
-      } catch (_) {}
-
-      // Add standard USB / COM serial targets
       targetNames.addAll([
         'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8',
         '\\\\.\\COM1', '\\\\.\\COM2', '\\\\.\\COM3', '\\\\.\\COM4', '\\\\.\\COM5',
@@ -86,94 +182,9 @@ class TSPLPrinter {
       ]);
 
       for (var target in targetNames) {
-        // 1. Attempt Win32 RAW Spooler API via PowerShell Script for Installed Windows Drivers
-        if (!target.startsWith('COM') && !target.startsWith('LPT') && !target.startsWith('\\\\')) {
-          try {
-            final tempFile = File('${Directory.systemTemp.path}\\tspl_${DateTime.now().millisecondsSinceEpoch}.tspl');
-            await tempFile.writeAsBytes(bytes);
-
-            final psScript = '''
-\$code = @"
-using System;
-using System.IO;
-using System.Runtime.InteropServices;
-public class Win32RawPrinter {
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
-    public class DOCINFOA {
-        [MarshalAs(UnmanagedType.LPStr)] public string pDocName;
-        [MarshalAs(UnmanagedType.LPStr)] public string pOutputFile;
-        [MarshalAs(UnmanagedType.LPStr)] public string pDataType;
-    }
-    [DllImport("winspool.drv", EntryPoint = "OpenPrinterA", SetLastError = true, CharSet = CharSet.Ansi, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
-    public static extern bool OpenPrinter([MarshalAs(UnmanagedType.LPStr)] string szPrinter, out IntPtr hPrinter, IntPtr pd);
-    [DllImport("winspool.drv", EntryPoint = "ClosePrinter", SetLastError = true, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
-    public static extern bool ClosePrinter(IntPtr hPrinter);
-    [DllImport("winspool.drv", EntryPoint = "StartDocPrinterA", SetLastError = true, CharSet = CharSet.Ansi, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
-    public static extern bool StartDocPrinter(IntPtr hPrinter, Int32 level, [In, MarshalAs(UnmanagedType.LPStruct)] DOCINFOA di);
-    [DllImport("winspool.drv", EntryPoint = "EndDocPrinter", SetLastError = true, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
-    public static extern bool EndDocPrinter(IntPtr hPrinter);
-    [DllImport("winspool.drv", EntryPoint = "StartPagePrinter", SetLastError = true, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
-    public static extern bool StartPagePrinter(IntPtr hPrinter);
-    [DllImport("winspool.drv", EntryPoint = "EndPagePrinter", SetLastError = true, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
-    public static extern bool EndPagePrinter(IntPtr hPrinter);
-    [DllImport("winspool.drv", EntryPoint = "WritePrinter", SetLastError = true, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
-    public static extern bool WritePrinter(IntPtr hPrinter, IntPtr pBytes, Int32 dwCount, out Int32 dwWritten);
-
-    public static bool PrintRaw(string printerName, string filePath) {
-        byte[] pBytes = File.ReadAllBytes(filePath);
-        IntPtr hPrinter = IntPtr.Zero;
-        DOCINFOA di = new DOCINFOA();
-        di.pDocName = "JewelPOS_TSPL_Label";
-        di.pDataType = "RAW";
-        if (OpenPrinter(printerName, out hPrinter, IntPtr.Zero)) {
-            if (StartDocPrinter(hPrinter, 1, di)) {
-                if (StartPagePrinter(hPrinter)) {
-                    IntPtr pUnmanagedBytes = Marshal.AllocCoTaskMem(pBytes.Length);
-                    Marshal.Copy(pBytes, 0, pUnmanagedBytes, pBytes.Length);
-                    Int32 dwWritten = 0;
-                    bool bSuccess = WritePrinter(hPrinter, pUnmanagedBytes, pBytes.Length, out dwWritten);
-                    Marshal.FreeCoTaskMem(pUnmanagedBytes);
-                    EndPagePrinter(hPrinter);
-                    EndDocPrinter(hPrinter);
-                    ClosePrinter(hPrinter);
-                    return bSuccess && dwWritten == pBytes.Length;
-                }
-                EndDocPrinter(hPrinter);
-            }
-            ClosePrinter(hPrinter);
-        }
-        return false;
-    }
-}
-"@
-if (-not ([System.Management.Automation.PSTypeName]'Win32RawPrinter').Type) {
-    Add-Type -TypeDefinition \$code
-}
-\$res = [Win32RawPrinter]::PrintRaw('$target', '${tempFile.path.replaceAll('\\', '\\\\')}')
-if (\$res) { Write-Host "SUCCESS_RAW" } else { Write-Host "FAILED_RAW" }
-''';
-
-            final scriptFile = File('${Directory.systemTemp.path}\\raw_spool_${DateTime.now().millisecondsSinceEpoch}.ps1');
-            await scriptFile.writeAsString(psScript);
-
-            final psResult = await Process.run('powershell', [
-              '-ExecutionPolicy', 'Bypass',
-              '-File', scriptFile.path
-            ]);
-
-            try { await tempFile.delete(); } catch (_) {}
-            try { await scriptFile.delete(); } catch (_) {}
-
-            if ((psResult.stdout as String).contains('SUCCESS_RAW')) {
-              return true;
-            }
-          } catch (_) {}
-        }
-
-        // 2. Attempt Direct Binary Copy to COM / LPT port or Local Spool Share
         try {
           final tempFile = File('${Directory.systemTemp.path}\\raw_copy.tspl');
-          await tempFile.writeAsBytes(bytes);
+          await tempFile.writeAsBytes(rawBytes);
 
           final rawResult = await Process.run('cmd.exe', [
             '/c',
@@ -192,10 +203,10 @@ if (\$res) { Write-Host "SUCCESS_RAW" } else { Write-Host "FAILED_RAW" }
       }
     }
 
-    // 3. Try Network TCP Socket Connection (Ethernet / WiFi / USB Virtual IP)
+    // 3. Network TCP Socket Connection (Ethernet / WiFi / USB Virtual IP)
     try {
       final socket = await Socket.connect(host, port, timeout: const Duration(seconds: 2));
-      socket.add(bytes);
+      socket.add(rawBytes);
       await socket.flush();
       await socket.close();
       return true;
