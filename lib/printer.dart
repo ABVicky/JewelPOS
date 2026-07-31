@@ -39,7 +39,7 @@ class TSPLPrinter {
     return [];
   }
 
-  /// Sends raw TSPL commands to Windows Installed Printer Driver by Name, USB COM Port, or TCP Socket
+  /// Sends raw TSPL commands to Windows Installed Printer Driver via Win32 RAW Spooler, USB COM Port, or TCP Socket
   static Future<bool> sendTSPLToPrinter(
     InventoryItem item, {
     required String host,
@@ -55,19 +55,21 @@ class TSPLPrinter {
     final bytes = utf8.encode(tsplStr);
 
     if (Platform.isWindows) {
-      // 1. Try Named Windows Printer Driver (e.g. "HPRT HT800", "HPRT", "HT800")
       final List<String> targetNames = [];
       if (usbPortName != null && usbPortName.trim().isNotEmpty) {
         targetNames.add(usbPortName.trim());
       }
-      
-      // Auto-detect installed printers if targetNames is empty or generic
+
+      // Auto-detect installed Windows printers if target is generic
       try {
         final installedPrinters = await getInstalledWindowsPrinters();
         for (var p in installedPrinters) {
           if (!targetNames.contains(p)) {
-            // Prioritize HPRT or thermal printer names
-            if (p.toLowerCase().contains('hprt') || p.toLowerCase().contains('label') || p.toLowerCase().contains('pos') || p.toLowerCase().contains('tsc')) {
+            if (p.toLowerCase().contains('hprt') ||
+                p.toLowerCase().contains('label') ||
+                p.toLowerCase().contains('pos') ||
+                p.toLowerCase().contains('tsc') ||
+                p.toLowerCase().contains('barcode')) {
               targetNames.insert(0, p);
             } else {
               targetNames.add(p);
@@ -76,28 +78,103 @@ class TSPLPrinter {
         }
       } catch (_) {}
 
-      // Add common COM / LPT serial ports
+      // Add standard USB / COM serial targets
       targetNames.addAll([
-        'COM3', 'COM1', 'COM2', 'COM4', 'COM5', 'COM6', 'LPT1', 'PRN'
+        'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8',
+        '\\\\.\\COM1', '\\\\.\\COM2', '\\\\.\\COM3', '\\\\.\\COM4', '\\\\.\\COM5',
+        'LPT1', 'PRN'
       ]);
 
       for (var target in targetNames) {
+        // 1. Attempt Win32 RAW Spooler API via PowerShell Script for Installed Windows Drivers
+        if (!target.startsWith('COM') && !target.startsWith('LPT') && !target.startsWith('\\\\')) {
+          try {
+            final tempFile = File('${Directory.systemTemp.path}\\tspl_${DateTime.now().millisecondsSinceEpoch}.tspl');
+            await tempFile.writeAsBytes(bytes);
+
+            final psScript = '''
+\$code = @"
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+public class Win32RawPrinter {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    public class DOCINFOA {
+        [MarshalAs(UnmanagedType.LPStr)] public string pDocName;
+        [MarshalAs(UnmanagedType.LPStr)] public string pOutputFile;
+        [MarshalAs(UnmanagedType.LPStr)] public string pDataType;
+    }
+    [DllImport("winspool.drv", EntryPoint = "OpenPrinterA", SetLastError = true, CharSet = CharSet.Ansi, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool OpenPrinter([MarshalAs(UnmanagedType.LPStr)] string szPrinter, out IntPtr hPrinter, IntPtr pd);
+    [DllImport("winspool.drv", EntryPoint = "ClosePrinter", SetLastError = true, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool ClosePrinter(IntPtr hPrinter);
+    [DllImport("winspool.drv", EntryPoint = "StartDocPrinterA", SetLastError = true, CharSet = CharSet.Ansi, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool StartDocPrinter(IntPtr hPrinter, Int32 level, [In, MarshalAs(UnmanagedType.LPStruct)] DOCINFOA di);
+    [DllImport("winspool.drv", EntryPoint = "EndDocPrinter", SetLastError = true, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool EndDocPrinter(IntPtr hPrinter);
+    [DllImport("winspool.drv", EntryPoint = "StartPagePrinter", SetLastError = true, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool StartPagePrinter(IntPtr hPrinter);
+    [DllImport("winspool.drv", EntryPoint = "EndPagePrinter", SetLastError = true, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool EndPagePrinter(IntPtr hPrinter);
+    [DllImport("winspool.drv", EntryPoint = "WritePrinter", SetLastError = true, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool WritePrinter(IntPtr hPrinter, IntPtr pBytes, Int32 dwCount, out Int32 dwWritten);
+
+    public static bool PrintRaw(string printerName, string filePath) {
+        byte[] pBytes = File.ReadAllBytes(filePath);
+        IntPtr hPrinter = IntPtr.Zero;
+        DOCINFOA di = new DOCINFOA();
+        di.pDocName = "JewelPOS_TSPL_Label";
+        di.pDataType = "RAW";
+        if (OpenPrinter(printerName, out hPrinter, IntPtr.Zero)) {
+            if (StartDocPrinter(hPrinter, 1, di)) {
+                if (StartPagePrinter(hPrinter)) {
+                    IntPtr pUnmanagedBytes = Marshal.AllocCoTaskMem(pBytes.Length);
+                    Marshal.Copy(pBytes, 0, pUnmanagedBytes, pBytes.Length);
+                    Int32 dwWritten = 0;
+                    bool bSuccess = WritePrinter(hPrinter, pUnmanagedBytes, pBytes.Length, out dwWritten);
+                    Marshal.FreeCoTaskMem(pUnmanagedBytes);
+                    EndPagePrinter(hPrinter);
+                    EndDocPrinter(hPrinter);
+                    ClosePrinter(hPrinter);
+                    return bSuccess && dwWritten == pBytes.Length;
+                }
+                EndDocPrinter(hPrinter);
+            }
+            ClosePrinter(hPrinter);
+        }
+        return false;
+    }
+}
+"@
+if (-not ([System.Management.Automation.PSTypeName]'Win32RawPrinter').Type) {
+    Add-Type -TypeDefinition \$code
+}
+\$res = [Win32RawPrinter]::PrintRaw('$target', '${tempFile.path.replaceAll('\\', '\\\\')}')
+if (\$res) { Write-Host "SUCCESS_RAW" } else { Write-Host "FAILED_RAW" }
+''';
+
+            final scriptFile = File('${Directory.systemTemp.path}\\raw_spool_${DateTime.now().millisecondsSinceEpoch}.ps1');
+            await scriptFile.writeAsString(psScript);
+
+            final psResult = await Process.run('powershell', [
+              '-ExecutionPolicy', 'Bypass',
+              '-File', scriptFile.path
+            ]);
+
+            try { await tempFile.delete(); } catch (_) {}
+            try { await scriptFile.delete(); } catch (_) {}
+
+            if ((psResult.stdout as String).contains('SUCCESS_RAW')) {
+              return true;
+            }
+          } catch (_) {}
+        }
+
+        // 2. Attempt Direct Binary Copy to COM / LPT port or Local Spool Share
         try {
-          final tempFile = File('${Directory.systemTemp.path}\\label_${DateTime.now().millisecondsSinceEpoch}.tspl');
+          final tempFile = File('${Directory.systemTemp.path}\\raw_copy.tspl');
           await tempFile.writeAsBytes(bytes);
 
-          // Attempt PowerShell Out-Printer by Installed Printer Name
-          final psResult = await Process.run('powershell', [
-            '-Command',
-            "Get-Content '${tempFile.path}' | Out-Printer -Name '$target'"
-          ]);
-
-          if (psResult.exitCode == 0) {
-            try { await tempFile.delete(); } catch (_) {}
-            return true;
-          }
-
-          // Attempt Windows Raw Copy to Printer Spooler Name or COM port
           final rawResult = await Process.run('cmd.exe', [
             '/c',
             'copy',
@@ -115,7 +192,7 @@ class TSPLPrinter {
       }
     }
 
-    // 2. Try Network TCP Socket Connection (Ethernet / WiFi / USB Virtual IP)
+    // 3. Try Network TCP Socket Connection (Ethernet / WiFi / USB Virtual IP)
     try {
       final socket = await Socket.connect(host, port, timeout: const Duration(seconds: 2));
       socket.add(bytes);
