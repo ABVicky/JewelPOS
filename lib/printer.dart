@@ -12,10 +12,9 @@ class TSPLPrinter {
     buffer.writeln('GAP 2 mm, 0 mm');
     buffer.writeln('DIRECTION 1');
     buffer.writeln('CLS');
-    buffer.writeln('TEXT 15,10,"3",0,1,1,"${item.itemName}"');
-    buffer.writeln('TEXT 15,40,"2",0,1,1,"Cat: ${item.category}  Pur: ${item.purity}"');
-    buffer.writeln('TEXT 15,65,"2",0,1,1,"Wt: ${item.weight.toStringAsFixed(4)} g"');
-    buffer.writeln('BARCODE 15,95,"128",45,1,0,2,2,"${item.barcode}"');
+    buffer.writeln('TEXT 15,10,"2",0,1,1,"${item.itemName} (${item.category})"');
+    buffer.writeln('TEXT 15,38,"2",0,1,1,"Pur: ${item.purity}  Wt: ${item.weight.toStringAsFixed(4)} g"');
+    buffer.writeln('BARCODE 15,68,"128",55,1,0,2,2,"${item.barcode}"');
     buffer.writeln('PRINT 1,1');
     return buffer.toString();
   }
