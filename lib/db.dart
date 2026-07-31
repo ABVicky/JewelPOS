@@ -134,6 +134,11 @@ class InventoryDB {
     );
   }
 
+  static Future<int> deleteItem(int id) async {
+    final db = await instance;
+    return await db.delete('Inventory', where: 'id = ?', whereArgs: [id]);
+  }
+
   static Future<List<InventoryItem>> getAllItems() async {
     final db = await instance;
     final res = await db.query('Inventory', orderBy: 'id DESC');

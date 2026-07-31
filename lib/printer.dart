@@ -14,7 +14,7 @@ class TSPLPrinter {
     buffer.writeln('CLS');
     buffer.writeln('TEXT 15,10,"3",0,1,1,"${item.itemName}"');
     buffer.writeln('TEXT 15,40,"2",0,1,1,"Cat: ${item.category}  Pur: ${item.purity}"');
-    buffer.writeln('TEXT 15,65,"2",0,1,1,"Wt: ${item.weight.toStringAsFixed(2)} g"');
+    buffer.writeln('TEXT 15,65,"2",0,1,1,"Wt: ${item.weight.toStringAsFixed(4)} g"');
     buffer.writeln('BARCODE 15,95,"128",45,1,0,2,2,"${item.barcode}"');
     buffer.writeln('PRINT 1,1');
     return buffer.toString();

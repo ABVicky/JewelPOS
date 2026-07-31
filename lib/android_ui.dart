@@ -451,13 +451,13 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       final nameStr = item.itemName.length > 20
           ? item.itemName.substring(0, 20)
           : item.itemName.padRight(20);
-      final wtStr = "${item.weight.toStringAsFixed(3)} g".padLeft(12);
+      final wtStr = "${item.weight.toStringAsFixed(4)} g".padLeft(12);
       bytes.addAll(utf8.encode("$nameStr$wtStr\n"));
     }
 
     bytes.addAll(utf8.encode("--------------------------------\n"));
     final countStr = itemsToPrint.length.toString();
-    final totWtStr = "${totalWeight.toStringAsFixed(3)} g";
+    final totWtStr = "${totalWeight.toStringAsFixed(4)} g";
 
     final countPad = ' ' * (32 - "Items".length - countStr.length);
     bytes.addAll(utf8.encode("Items$countPad$countStr\n"));
@@ -526,12 +526,12 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       final nameStr = item.itemName.length > 20
           ? item.itemName.substring(0, 20)
           : item.itemName.padRight(20);
-      final wtStr = "${item.weight.toStringAsFixed(3)} g".padLeft(12);
+      final wtStr = "${item.weight.toStringAsFixed(4)} g".padLeft(12);
       sb.writeln("$nameStr$wtStr");
     }
     sb.writeln("--------------------------------");
     final countStr = itemsToPrint.length.toString();
-    final totWtStr = "${totalWeight.toStringAsFixed(3)} g";
+    final totWtStr = "${totalWeight.toStringAsFixed(4)} g";
 
     final countPad = ' ' * (32 - "Items".length - countStr.length);
     sb.writeln("Items$countPad$countStr");
@@ -1091,7 +1091,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                                 ),
                                 const Spacer(),
                                 Text(
-                                  '${item.weight.toStringAsFixed(3)} g',
+                                  '${item.weight.toStringAsFixed(4)} g',
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black),
                                 ),
                               ],
@@ -1118,7 +1118,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                     style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   Text(
-                    'Total Weight: ${_totalWeight.toStringAsFixed(3)} g',
+                    'Total Weight: ${_totalWeight.toStringAsFixed(4)} g',
                     style: const TextStyle(color: Colors.amber, fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ],

@@ -16,10 +16,13 @@ class WindowsInventoryApp extends StatefulWidget {
 class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
   final _formKey = GlobalKey<FormState>();
 
-  // Left Panel Input Controllers
+  // Inventory Registration Controllers
   final _nameController = TextEditingController();
-  final _categoryController = TextEditingController(text: 'Ring');
-  final _purityController = TextEditingController(text: '22K');
+  final List<String> _categoryOptions = ['Pure Gold', 'With Stone', 'Others'];
+  String _selectedCategoryOption = 'Pure Gold';
+  final _customCategoryController = TextEditingController();
+
+  final _purityNumberController = TextEditingController(text: '22');
   final _weightController = TextEditingController();
   String _generatedBarcode = 'JMT000000001';
 
@@ -35,25 +38,22 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
   int _printerPort = 9100;
   int _httpServerPort = 8080;
 
-  final List<String> _categories = [
-    'Ring',
-    'Chain',
-    'Necklace',
-    'Bangle',
-    'Earrings',
-    'Pendant',
-    'Bracelet',
-    'Coins',
-    'Other'
-  ];
+  String get _finalCategory {
+    if (_selectedCategoryOption == 'Others') {
+      final custom = _customCategoryController.text.trim();
+      return custom.isEmpty ? 'Others' : custom;
+    }
+    return _selectedCategoryOption;
+  }
 
-  final List<String> _purities = [
-    '24K',
-    '22K (916)',
-    '18K (750)',
-    '14K (585)',
-    'Silver (925)'
-  ];
+  String get _finalPurity {
+    final raw = _purityNumberController.text.trim();
+    if (raw.isEmpty) return '22K';
+    if (raw.toUpperCase().endsWith('K')) {
+      return raw.toUpperCase();
+    }
+    return '${raw}K';
+  }
 
   @override
   void initState() {
@@ -129,8 +129,11 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
   void _clearForm() {
     _nameController.clear();
     _weightController.clear();
-    _categoryController.text = 'Ring';
-    _purityController.text = '22K';
+    _customCategoryController.clear();
+    _purityNumberController.text = '22';
+    setState(() {
+      _selectedCategoryOption = 'Pure Gold';
+    });
     _refreshData();
   }
 
@@ -138,8 +141,8 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     if (!_formKey.currentState!.validate()) return;
 
     final name = _nameController.text.trim();
-    final category = _categoryController.text.trim();
-    final purity = _purityController.text.trim();
+    final category = _finalCategory;
+    final purity = _finalPurity;
     final weight = double.tryParse(_weightController.text.trim());
 
     if (weight == null || weight <= 0) {
@@ -177,8 +180,8 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     if (!_formKey.currentState!.validate()) return;
 
     final name = _nameController.text.trim();
-    final category = _categoryController.text.trim();
-    final purity = _purityController.text.trim();
+    final category = _finalCategory;
+    final purity = _finalPurity;
     final weight = double.tryParse(_weightController.text.trim());
 
     if (weight == null || weight <= 0) {
@@ -261,7 +264,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
   }
 
   Future<void> _reprintLabel(InventoryItem item) async {
-    bool success = await TSPLPrinter.sendTSPLToPrinter(
+    bool printSuccess = await TSPLPrinter.sendTSPLToPrinter(
       item,
       host: _printerIp,
       port: _printerPort,
@@ -269,21 +272,299 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
 
     if (!mounted) return;
 
-    if (!success) {
+    if (printSuccess) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Label printed for item ${item.barcode}.'),
+          backgroundColor: Colors.green.shade800,
+        ),
+      );
+    } else {
+      _showErrorDialog(
+        'Printer Disconnected',
+        'Could not connect to TSPL printer at IP: $_printerIp Port: $_printerPort.\nPlease verify printer connection or update Printer IP in Settings.',
+      );
+    }
+  }
+
+  Future<void> _printSelectedLabels() async {
+    if (_selectedBarcodes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No items selected for printing.')),
+      );
+      return;
+    }
+
+    final itemsToPrint = _allItems.where((item) => _selectedBarcodes.contains(item.barcode)).toList();
+    int printedCount = 0;
+    int failedCount = 0;
+
+    for (var item in itemsToPrint) {
+      bool ok = await TSPLPrinter.sendTSPLToPrinter(
+        item,
+        host: _printerIp,
+        port: _printerPort,
+      );
+      if (ok) {
+        printedCount++;
+      } else {
+        failedCount++;
+      }
+    }
+
+    if (!mounted) return;
+
+    if (failedCount == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Successfully printed $printedCount selected label(s).'),
+          backgroundColor: Colors.green.shade800,
+        ),
+      );
+    } else if (printedCount > 0) {
+      _showErrorDialog(
+        'Partial Print Result',
+        'Printed $printedCount label(s). Failed $failedCount label(s) because printer disconnected.',
+      );
+    } else {
+      _showErrorDialog(
+        'Printer Disconnected',
+        'Could not print $failedCount selected label(s). Printer unreachable at IP: $_printerIp Port: $_printerPort.',
+      );
+    }
+  }
+
+  Future<void> _deleteItem(InventoryItem item) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+        title: const Text('Confirm Delete'),
+        content: Text('Are you sure you want to delete item "${item.itemName}" (${item.barcode})?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade800,
+              foregroundColor: Colors.white,
+              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && item.id != null) {
+      try {
+        await InventoryDB.deleteItem(item.id!);
+        _selectedBarcodes.remove(item.barcode);
+        await _refreshData();
+      } catch (e) {
+        _showErrorDialog('Delete Error', 'Could not delete item.');
+      }
+    }
+  }
+
+  void _showErrorDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: Text(message),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E293B),
+              foregroundColor: Colors.white,
+              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _backupDatabase() async {
+    try {
+      final destPath = await InventoryDB.backupDatabase();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Database backed up successfully to $destPath'),
+          backgroundColor: Colors.green.shade800,
+        ),
+      );
+    } catch (e) {
+      _showErrorDialog('Backup Failed', 'Could not backup database: $e');
+    }
+  }
+
+  Future<void> _restoreDatabase() async {
+    try {
+      final files = await InventoryDB.getBackupFiles();
+
+      if (files.isEmpty) {
+        _showErrorDialog('No Backups Found', 'No backup files found in backup directory.');
+        return;
+      }
+
+      if (!mounted) return;
       showDialog(
         context: context,
-        barrierDismissible: false,
         builder: (ctx) => AlertDialog(
           shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-          title: const Row(
-            children: [
-              Icon(Icons.print_disabled, color: Colors.red),
-              SizedBox(width: 8),
-              Text('Printer Not Connected'),
-            ],
+          title: const Text('Select Backup to Restore'),
+          content: SizedBox(
+            width: 400,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: files.length,
+              itemBuilder: (c, i) {
+                final file = files[i];
+                final name = file.path.split(Platform.pathSeparator).last;
+                return ListTile(
+                  title: Text(name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                  subtitle: Text('Modified: ${file.lastModifiedSync()}'),
+                  onTap: () async {
+                    Navigator.of(ctx).pop();
+                    await InventoryDB.restoreDatabase(file);
+                    await _refreshData();
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Database restored from $name'),
+                        backgroundColor: Colors.green.shade800,
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
           ),
-          content: Text(
-            'Could not send label to TSPL printer at IP: $_printerIp Port: $_printerPort.\nPlease verify printer connection and power status.',
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      _showErrorDialog('Restore Failed', 'Database restore failed: $e');
+    }
+  }
+
+  void _showEditDialog(InventoryItem item) {
+    final nameCtrl = TextEditingController(text: item.itemName);
+    String selCatOpt = _categoryOptions.contains(item.category) ? item.category : 'Others';
+    final customCatCtrl = TextEditingController(text: _categoryOptions.contains(item.category) ? '' : item.category);
+
+    final rawPurity = item.purity.replaceAll(RegExp(r'[^0-9]'), '');
+    final purityNumCtrl = TextEditingController(text: rawPurity.isEmpty ? '22' : rawPurity);
+    final weightCtrl = TextEditingController(text: item.weight.toStringAsFixed(4));
+    final editFormKey = GlobalKey<FormState>();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+          title: Text('Edit Item (${item.barcode})'),
+          content: SizedBox(
+            width: 400,
+            child: Form(
+              key: editFormKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextFormField(
+                    initialValue: item.barcode,
+                    enabled: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Barcode (NOT editable)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Item Name *',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (val) => val == null || val.trim().isEmpty ? 'Item name required' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: selCatOpt,
+                    decoration: const InputDecoration(
+                      labelText: 'Category / Type *',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: _categoryOptions.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setDlgState(() => selCatOpt = val);
+                      }
+                    },
+                  ),
+                  if (selCatOpt == 'Others') ...[
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: customCatCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Custom Type / Category *',
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (val) => (selCatOpt == 'Others' && (val == null || val.trim().isEmpty))
+                          ? 'Custom category required'
+                          : null,
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: purityNumCtrl,
+                    keyboardType: TextInputType.text,
+                    decoration: const InputDecoration(
+                      labelText: 'Purity *',
+                      suffixText: 'K',
+                      hintText: 'e.g. 24 or 22',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (val) => val == null || val.trim().isEmpty ? 'Purity required' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: weightCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Weight (grams) *',
+                      hintText: 'e.g. 19.1000',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (val) {
+                      if (val == null || val.trim().isEmpty) return 'Weight is required';
+                      final w = double.tryParse(val.trim());
+                      if (w == null || w <= 0) return 'Enter a weight greater than zero';
+                      final parts = val.trim().split('.');
+                      if (parts.length > 1 && parts[1].length > 4) {
+                        return 'Maximum 4 decimal places allowed';
+                      }
+                      return null;
+                    },
+                  ),
+                ],
+              ),
+            ),
           ),
           actions: [
             TextButton(
@@ -296,335 +577,36 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                 foregroundColor: Colors.white,
                 shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
               ),
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                _reprintLabel(item);
+              onPressed: () async {
+                if (!editFormKey.currentState!.validate()) return;
+                final finalCat = selCatOpt == 'Others'
+                    ? (customCatCtrl.text.trim().isEmpty ? 'Others' : customCatCtrl.text.trim())
+                    : selCatOpt;
+
+                final rawP = purityNumCtrl.text.trim();
+                final finalP = rawP.toUpperCase().endsWith('K') ? rawP.toUpperCase() : '${rawP}K';
+
+                final updatedItem = InventoryItem(
+                  id: item.id,
+                  barcode: item.barcode,
+                  itemName: nameCtrl.text.trim(),
+                  category: finalCat,
+                  purity: finalP,
+                  weight: double.parse(weightCtrl.text.trim()),
+                  createdAt: item.createdAt,
+                );
+                try {
+                  await InventoryDB.updateItem(updatedItem);
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+                  _refreshData();
+                } catch (e) {
+                  _showErrorDialog('Database Error', 'Update failed.');
+                }
               },
-              child: const Text('Retry'),
+              child: const Text('Save Changes'),
             ),
           ],
         ),
-      );
-    }
-  }
-
-  Future<void> _printSelectedItems() async {
-    if (_selectedBarcodes.isEmpty) return;
-
-    final selectedItems = _allItems.where((item) => _selectedBarcodes.contains(item.barcode)).toList();
-
-    int successCount = 0;
-    List<InventoryItem> failedItems = [];
-
-    for (var item in selectedItems) {
-      bool ok = await TSPLPrinter.sendTSPLToPrinter(
-        item,
-        host: _printerIp,
-        port: _printerPort,
-      );
-      if (ok) {
-        successCount++;
-      } else {
-        failedItems.add(item);
-      }
-    }
-
-    if (!mounted) return;
-
-    if (failedItems.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Successfully printed $successCount barcode label(s).'),
-          backgroundColor: Colors.green.shade800,
-        ),
-      );
-      setState(() {
-        _selectedBarcodes.clear();
-      });
-    } else {
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-          title: const Row(
-            children: [
-              Icon(Icons.print_disabled, color: Colors.orange),
-              SizedBox(width: 8),
-              Text('Batch Printing Status'),
-            ],
-          ),
-          content: Text(
-            'Printed $successCount label(s).\nFailed to print ${failedItems.length} label(s) (Printer unreachable at IP: $_printerIp Port: $_printerPort).',
-          ),
-          actions: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1E293B),
-                foregroundColor: Colors.white,
-                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-              ),
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-    }
-  }
-
-  Future<void> _backupDatabase() async {
-    try {
-      final backupPath = await InventoryDB.backupDatabase();
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-          title: const Row(
-            children: [
-              Icon(Icons.check_circle, color: Colors.green),
-              SizedBox(width: 8),
-              Text('Backup Successful'),
-            ],
-          ),
-          content: Text('Database inventory.db backed up to:\n\n$backupPath'),
-          actions: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1E293B),
-                foregroundColor: Colors.white,
-                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-              ),
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      _showErrorDialog('Backup Failed', 'Could not create database backup.');
-    }
-  }
-
-  Future<void> _restoreDatabase() async {
-    try {
-      final backupFiles = await InventoryDB.getBackupFiles();
-      if (!mounted) return;
-
-      if (backupFiles.isEmpty) {
-        _showErrorDialog('Restore Failed', 'No backup database files found in Backups folder.');
-        return;
-      }
-
-      File? selectedFile = backupFiles.first;
-
-      showDialog(
-        context: context,
-        builder: (ctx) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-            title: const Text('Restore Database'),
-            content: SizedBox(
-              width: 450,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Select a backup file to restore:'),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<File>(
-                    initialValue: selectedFile,
-                    decoration: const InputDecoration(border: OutlineInputBorder()),
-                    items: backupFiles.map((file) {
-                      final name = file.path.split(Platform.pathSeparator).last;
-                      return DropdownMenuItem(value: file, child: Text(name));
-                    }).toList(),
-                    onChanged: (val) {
-                      setDialogState(() => selectedFile = val);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'WARNING: Restoring will replace current inventory.db file.',
-                    style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red.shade900,
-                  foregroundColor: Colors.white,
-                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-                ),
-                onPressed: () async {
-                  Navigator.of(ctx).pop();
-                  if (selectedFile != null) {
-                    try {
-                      await InventoryDB.restoreDatabase(selectedFile!);
-                      await _refreshData();
-                      if (!context.mounted) return;
-                      showDialog(
-                        context: context,
-                        builder: (c) => AlertDialog(
-                          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-                          title: const Text('Restore Successful'),
-                          content: const Text('Database restored successfully.'),
-                          actions: [
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF1E293B),
-                                foregroundColor: Colors.white,
-                                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-                              ),
-                              onPressed: () => Navigator.of(c).pop(),
-                              child: const Text('OK'),
-                            ),
-                          ],
-                        ),
-                      );
-                    } catch (e) {
-                      _showErrorDialog('Restore Failed', 'Database restore failed.');
-                    }
-                  }
-                },
-                child: const Text('Restore'),
-              ),
-            ],
-          ),
-        ),
-      );
-    } catch (e) {
-      _showErrorDialog('Restore Failed', 'Database restore failed.');
-    }
-  }
-
-  void _showEditDialog(InventoryItem item) {
-    final nameCtrl = TextEditingController(text: item.itemName);
-    final categoryCtrl = TextEditingController(text: item.category);
-    final purityCtrl = TextEditingController(text: item.purity);
-    final weightCtrl = TextEditingController(text: item.weight.toString());
-    final editFormKey = GlobalKey<FormState>();
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-        title: Text('Edit Item (${item.barcode})'),
-        content: SizedBox(
-          width: 400,
-          child: Form(
-            key: editFormKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextFormField(
-                  initialValue: item.barcode,
-                  enabled: false,
-                  decoration: const InputDecoration(
-                    labelText: 'Barcode (NOT editable)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Item Name *',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (val) => val == null || val.trim().isEmpty ? 'Item name required' : null,
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _categories.contains(categoryCtrl.text) ? categoryCtrl.text : _categories.first,
-                        decoration: const InputDecoration(
-                          labelText: 'Category',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                        onChanged: (val) => categoryCtrl.text = val!,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _purities.contains(purityCtrl.text) ? purityCtrl.text : _purities.first,
-                        decoration: const InputDecoration(
-                          labelText: 'Purity',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: _purities.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-                        onChanged: (val) => purityCtrl.text = val!,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: weightCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Weight (grams) *',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (val) {
-                    if (val == null || val.trim().isEmpty) return 'Weight is required';
-                    final w = double.tryParse(val.trim());
-                    if (w == null || w <= 0) return 'Enter a weight greater than zero';
-                    final parts = val.trim().split('.');
-                    if (parts.length > 1 && parts[1].length > 3) {
-                      return 'Maximum 3 decimal places allowed';
-                    }
-                    return null;
-                  },
-                ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1E293B),
-              foregroundColor: Colors.white,
-              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-            ),
-            onPressed: () async {
-              if (!editFormKey.currentState!.validate()) return;
-              final updatedItem = InventoryItem(
-                id: item.id,
-                barcode: item.barcode,
-                itemName: nameCtrl.text.trim(),
-                category: categoryCtrl.text.trim(),
-                purity: purityCtrl.text.trim(),
-                weight: double.parse(weightCtrl.text.trim()),
-                createdAt: item.createdAt,
-              );
-              try {
-                await InventoryDB.updateItem(updatedItem);
-                if (ctx.mounted) Navigator.of(ctx).pop();
-                _refreshData();
-              } catch (e) {
-                _showErrorDialog('Database Error', 'Update failed.');
-              }
-            },
-            child: const Text('Save Changes'),
-          ),
-        ],
       ),
     );
   }
@@ -893,7 +875,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                   ]),
                   TableRow(children: [
                     const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Weight:', style: TextStyle(fontWeight: FontWeight.bold))),
-                    Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text('${item.weight.toStringAsFixed(3)} g')),
+                    Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text('${item.weight.toStringAsFixed(4)} g')),
                   ]),
                 ],
               ),
@@ -917,28 +899,6 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
             },
             icon: const Icon(Icons.print, size: 16),
             label: const Text('Print Label'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showErrorDialog(String title, String message) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: Text(message),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1E293B),
-              foregroundColor: Colors.white,
-              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-            ),
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('OK'),
           ),
         ],
       ),
@@ -1080,12 +1040,12 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Item Name Field
+                    // 1. Item Name Field
                     TextFormField(
                       controller: _nameController,
                       decoration: const InputDecoration(
                         labelText: 'Item Name *',
-                        hintText: 'e.g. Gold Necklace',
+                        hintText: 'e.g. Ring / Gold Necklace',
                         border: OutlineInputBorder(),
                         contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                       ),
@@ -1093,41 +1053,62 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Category Dropdown
+                    // 2. Category / Type Dropdown
                     DropdownButtonFormField<String>(
-                      initialValue: _categories.contains(_categoryController.text) ? _categoryController.text : _categories.first,
+                      initialValue: _selectedCategoryOption,
                       decoration: const InputDecoration(
-                        labelText: 'Category *',
+                        labelText: 'Category / Type *',
                         border: OutlineInputBorder(),
                         contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                       ),
-                      validator: (val) => val == null || val.isEmpty ? 'Category is required' : null,
-                      items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                      onChanged: (val) => setState(() => _categoryController.text = val!),
+                      items: _categoryOptions.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                      onChanged: (val) {
+                        if (val != null) {
+                          setState(() {
+                            _selectedCategoryOption = val;
+                          });
+                        }
+                      },
                     ),
+                    if (_selectedCategoryOption == 'Others') ...[
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _customCategoryController,
+                        decoration: const InputDecoration(
+                          labelText: 'Custom Type / Category *',
+                          hintText: 'e.g. Antique Bangle',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        ),
+                        validator: (val) => (_selectedCategoryOption == 'Others' && (val == null || val.trim().isEmpty))
+                            ? 'Please enter custom type'
+                            : null,
+                      ),
+                    ],
                     const SizedBox(height: 16),
 
-                    // Purity Dropdown
-                    DropdownButtonFormField<String>(
-                      initialValue: _purities.contains(_purityController.text) ? _purityController.text : _purities.first,
+                    // 3. Purity Input Field (Number + K placed)
+                    TextFormField(
+                      controller: _purityNumberController,
+                      keyboardType: TextInputType.text,
                       decoration: const InputDecoration(
                         labelText: 'Purity *',
+                        suffixText: 'K',
+                        hintText: 'e.g. 24 or 22',
                         border: OutlineInputBorder(),
                         contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                       ),
-                      validator: (val) => val == null || val.isEmpty ? 'Purity is required' : null,
-                      items: _purities.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-                      onChanged: (val) => setState(() => _purityController.text = val!),
+                      validator: (val) => val == null || val.trim().isEmpty ? 'Purity is required' : null,
                     ),
                     const SizedBox(height: 16),
 
-                    // Weight Input Field
+                    // 4. Weight (grams) Field (4 digits after .)
                     TextFormField(
                       controller: _weightController,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(
                         labelText: 'Weight (grams) *',
-                        hintText: 'e.g. 12.350',
+                        hintText: 'e.g. 19.1000',
                         border: OutlineInputBorder(),
                         contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                       ),
@@ -1136,8 +1117,8 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                         final w = double.tryParse(val.trim());
                         if (w == null || w <= 0) return 'Enter a weight greater than zero';
                         final parts = val.trim().split('.');
-                        if (parts.length > 1 && parts[1].length > 3) {
-                          return 'Maximum 3 decimal places allowed';
+                        if (parts.length > 1 && parts[1].length > 4) {
+                          return 'Maximum 4 decimal places allowed';
                         }
                         return null;
                       },
@@ -1193,60 +1174,55 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
             ),
           ),
 
+          // VERTICAL SEPARATOR
           const VerticalDivider(width: 1, color: Color(0xFFCBD5E1)),
 
           // RIGHT PANEL: Inventory Search & Data Table
           Expanded(
             child: Container(
-              color: const Color(0xFFF8FAFC),
+              color: Colors.white,
               padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    decoration: const BoxDecoration(
-                      border: Border(bottom: BorderSide(color: Color(0xFFCBD5E1), width: 1)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.inventory, color: Color(0xFF1E293B)),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Inventory Search',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1E293B),
-                          ),
+                  Row(
+                    children: [
+                      const Icon(Icons.inventory, color: Color(0xFF1E293B)),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Inventory Search',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1E293B),
                         ),
-                        const Spacer(),
-                        if (_selectedBarcodes.isNotEmpty)
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF0F172A),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-                            ),
-                            onPressed: _printSelectedItems,
-                            icon: const Icon(Icons.print, size: 16),
-                            label: Text('Print Selected (${_selectedBarcodes.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                      const Spacer(),
+                      if (_selectedBarcodes.isNotEmpty)
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF0F172A),
+                            foregroundColor: Colors.white,
+                            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                           ),
-                        if (_selectedBarcodes.isNotEmpty) const SizedBox(width: 12),
-                        Text(
-                          'Total Items: ${_filteredItems.length}',
-                          style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
+                          onPressed: _printSelectedLabels,
+                          icon: const Icon(Icons.print, size: 16),
+                          label: Text('Print Selected Labels (${_selectedBarcodes.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
                         ),
-                      ],
-                    ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Total Items: ${_filteredItems.length}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
 
-                  // Live Search Field
+                  // Search Bar
                   TextField(
                     controller: _searchController,
-                    onChanged: (_) => setState(_applySearch),
+                    onChanged: (_) => setState(() => _applySearch()),
                     decoration: InputDecoration(
                       hintText: 'Search by Barcode, Item Name, or Category...',
                       prefixIcon: const Icon(Icons.search),
@@ -1255,60 +1231,51 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                               icon: const Icon(Icons.clear),
                               onPressed: () {
                                 _searchController.clear();
-                                setState(_applySearch);
+                                setState(() => _applySearch());
                               },
                             )
                           : null,
                       border: const OutlineInputBorder(),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      fillColor: Colors.white,
-                      filled: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
 
-                  // Data Table view
+                  // Inventory Table
                   Expanded(
-                    child: Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        border: Border.all(color: const Color(0xFFCBD5E1)),
-                      ),
-                      child: _isLoading
-                          ? const Center(child: CircularProgressIndicator())
-                          : _filteredItems.isEmpty
-                              ? const Center(
-                                  child: Text(
-                                    'No Items Found',
-                                    style: TextStyle(fontSize: 16, color: Color(0xFF64748B), fontWeight: FontWeight.bold),
-                                  ),
-                                )
-                              : SingleChildScrollView(
-                                  scrollDirection: Axis.vertical,
+                    child: _isLoading
+                        ? const Center(child: CircularProgressIndicator())
+                        : _filteredItems.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  'No items found in inventory database.',
+                                  style: TextStyle(fontSize: 16, color: Colors.grey, fontWeight: FontWeight.bold),
+                                ),
+                              )
+                            : SingleChildScrollView(
+                                scrollDirection: Axis.vertical,
+                                child: SizedBox(
+                                  width: double.infinity,
                                   child: DataTable(
-                                    columnSpacing: 24,
                                     headingRowColor: WidgetStateProperty.all(const Color(0xFFF1F5F9)),
+                                    dataRowMinHeight: 48,
+                                    dataRowMaxHeight: 48,
                                     columns: [
                                       DataColumn(
-                                        label: Row(
-                                          children: [
-                                            Checkbox(
-                                              value: isAllSelected,
-                                              onChanged: (val) {
-                                                setState(() {
-                                                  if (val == true) {
-                                                    _selectedBarcodes = _filteredItems.map((i) => i.barcode).toSet();
-                                                  } else {
-                                                    _selectedBarcodes.clear();
-                                                  }
-                                                });
-                                              },
-                                            ),
-                                            const Text('Barcode', style: TextStyle(fontWeight: FontWeight.bold)),
-                                          ],
+                                        label: Checkbox(
+                                          value: isAllSelected,
+                                          onChanged: (val) {
+                                            setState(() {
+                                              if (val == true) {
+                                                _selectedBarcodes = _filteredItems.map((e) => e.barcode).toSet();
+                                              } else {
+                                                _selectedBarcodes.clear();
+                                              }
+                                            });
+                                          },
                                         ),
                                       ),
+                                      const DataColumn(label: Text('Barcode', style: TextStyle(fontWeight: FontWeight.bold))),
                                       const DataColumn(label: Text('Item Name', style: TextStyle(fontWeight: FontWeight.bold))),
                                       const DataColumn(label: Text('Category', style: TextStyle(fontWeight: FontWeight.bold))),
                                       const DataColumn(label: Text('Purity', style: TextStyle(fontWeight: FontWeight.bold))),
@@ -1330,23 +1297,32 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                                         },
                                         cells: [
                                           DataCell(
-                                            InkWell(
-                                              onTap: () => _showBarcodeDetailsDialog(item),
-                                              child: Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                                decoration: BoxDecoration(
-                                                  color: const Color(0xFF0F172A),
-                                                  borderRadius: BorderRadius.circular(4),
-                                                ),
+                                            Checkbox(
+                                              value: isSelected,
+                                              onChanged: (val) {
+                                                setState(() {
+                                                  if (val == true) {
+                                                    _selectedBarcodes.add(item.barcode);
+                                                  } else {
+                                                    _selectedBarcodes.remove(item.barcode);
+                                                  }
+                                                });
+                                              },
+                                            ),
+                                          ),
+                                          DataCell(
+                                            Tooltip(
+                                              message: 'Click to view barcode & QR code',
+                                              child: InkWell(
+                                                onTap: () => _showBarcodeDetailsDialog(item),
                                                 child: Row(
                                                   mainAxisSize: MainAxisSize.min,
                                                   children: [
-                                                    const Icon(Icons.qr_code, color: Colors.amber, size: 14),
+                                                    const Icon(Icons.qr_code, size: 16, color: Color(0xFF0F172A)),
                                                     const SizedBox(width: 6),
                                                     Text(
                                                       item.barcode,
                                                       style: const TextStyle(
-                                                        color: Colors.white,
                                                         fontFamily: 'monospace',
                                                         fontWeight: FontWeight.bold,
                                                         fontSize: 13,
@@ -1360,7 +1336,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                                           DataCell(Text(item.itemName)),
                                           DataCell(Text(item.category)),
                                           DataCell(Text(item.purity)),
-                                          DataCell(Text(item.weight.toStringAsFixed(3))),
+                                          DataCell(Text(item.weight.toStringAsFixed(4))),
                                           DataCell(
                                             Row(
                                               mainAxisSize: MainAxisSize.min,
@@ -1378,7 +1354,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                                                     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
                                                   ),
                                                   onPressed: () => _showEditDialog(item),
-                                                  child: const Text('Edit'),
+                                                  child: const Text('Edit', style: TextStyle(fontSize: 12)),
                                                 ),
                                                 const SizedBox(width: 6),
                                                 ElevatedButton(
@@ -1391,7 +1367,13 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                                                     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
                                                   ),
                                                   onPressed: () => _reprintLabel(item),
-                                                  child: const Text('Reprint'),
+                                                  child: const Text('Reprint', style: TextStyle(fontSize: 12)),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                IconButton(
+                                                  icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                                                  tooltip: 'Delete Item',
+                                                  onPressed: () => _deleteItem(item),
                                                 ),
                                               ],
                                             ),
@@ -1401,7 +1383,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                                     }).toList(),
                                   ),
                                 ),
-                    ),
+                              ),
                   ),
                 ],
               ),
