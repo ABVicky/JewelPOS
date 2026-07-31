@@ -34,9 +34,6 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
   bool _isLoading = true;
 
   // Settings State
-  String _printerIp = '192.168.1.100';
-  int _printerPort = 9100;
-  String _printerUsbPort = 'COM3';
   int _httpServerPort = 8080;
 
   String get _finalCategory {
@@ -67,25 +64,16 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     try {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
-        _printerIp = prefs.getString('printer_ip') ?? '192.168.1.100';
-        _printerPort = prefs.getInt('printer_port') ?? 9100;
-        _printerUsbPort = prefs.getString('printer_usb_port') ?? 'COM3';
         _httpServerPort = prefs.getInt('http_server_port') ?? 8080;
       });
     } catch (_) {}
   }
 
-  Future<void> _saveSettings(String ip, int port, String usbPort, int httpPort) async {
+  Future<void> _saveSettings(int httpPort) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('printer_ip', ip);
-      await prefs.setInt('printer_port', port);
-      await prefs.setString('printer_usb_port', usbPort);
       await prefs.setInt('http_server_port', httpPort);
       setState(() {
-        _printerIp = ip;
-        _printerPort = port;
-        _printerUsbPort = usbPort;
         _httpServerPort = httpPort;
       });
       if (mounted) {
@@ -213,13 +201,8 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
       return;
     }
 
-    // 2. Attempt TSPL label printing
-    bool printSuccess = await TSPLPrinter.sendTSPLToPrinter(
-      item,
-      host: _printerIp,
-      port: _printerPort,
-      usbPortName: _printerUsbPort,
-    );
+    // 2. Direct label printing
+    bool printSuccess = await TSPLPrinter.sendTSPLToPrinter(item);
 
     if (!mounted) return;
 
@@ -231,50 +214,17 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
         ),
       );
     } else {
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-          title: const Row(
-            children: [
-              Icon(Icons.check_circle, color: Colors.green),
-              SizedBox(width: 8),
-              Text('Saved (Printer Disconnected)'),
-            ],
-          ),
-          content: Text(
-            'Item "$name" ($barcode) was SAVED to inventory database successfully.\n\nHowever, label printing failed because printer is unreachable at IP: $_printerIp Port: $_printerPort.\n\nYou can select this item in the Inventory table to print its label at any time.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('OK / Skip Print'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1E293B),
-                foregroundColor: Colors.white,
-                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-              ),
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                _reprintLabel(item);
-              },
-              child: const Text('Retry Print'),
-            ),
-          ],
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Item "$name" saved to inventory database ($barcode).'),
+          backgroundColor: const Color(0xFF0F172A),
         ),
       );
     }
   }
 
   Future<void> _reprintLabel(InventoryItem item) async {
-    bool printSuccess = await TSPLPrinter.sendTSPLToPrinter(
-      item,
-      host: _printerIp,
-      port: _printerPort,
-      usbPortName: _printerUsbPort,
-    );
+    bool printSuccess = await TSPLPrinter.sendTSPLToPrinter(item);
 
     if (!mounted) return;
 
@@ -286,39 +236,10 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
         ),
       );
     } else {
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-          title: const Text('Printer Connection Error', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-          content: Text(
-            'Could not send direct print job to "$_printerUsbPort".\n\nYou can print directly via Windows System Print Dialog (Win + P) below or verify printer name in Settings.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            OutlinedButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                TSPLPrinter.layoutPdf(item);
-              },
-              child: const Text('Open Windows Print Dialog (Win + P)', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0F172A),
-                foregroundColor: Colors.white,
-                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-              ),
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                _reprintLabel(item);
-              },
-              child: const Text('Retry Direct Print'),
-            ),
-          ],
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not print label for item ${item.barcode}.'),
+          backgroundColor: Colors.red.shade800,
         ),
       );
     }
@@ -334,42 +255,20 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
 
     final itemsToPrint = _allItems.where((item) => _selectedBarcodes.contains(item.barcode)).toList();
     int printedCount = 0;
-    int failedCount = 0;
 
     for (var item in itemsToPrint) {
-      bool ok = await TSPLPrinter.sendTSPLToPrinter(
-        item,
-        host: _printerIp,
-        port: _printerPort,
-        usbPortName: _printerUsbPort,
-      );
-      if (ok) {
-        printedCount++;
-      } else {
-        failedCount++;
-      }
+      bool ok = await TSPLPrinter.sendTSPLToPrinter(item);
+      if (ok) printedCount++;
     }
 
     if (!mounted) return;
 
-    if (failedCount == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Successfully printed $printedCount selected label(s).'),
-          backgroundColor: Colors.green.shade800,
-        ),
-      );
-    } else if (printedCount > 0) {
-      _showErrorDialog(
-        'Partial Print Result',
-        'Printed $printedCount label(s). Failed $failedCount label(s) because printer disconnected.',
-      );
-    } else {
-      _showErrorDialog(
-        'Printer Disconnected',
-        'Could not print $failedCount selected label(s). Printer unreachable at IP: $_printerIp Port: $_printerPort.',
-      );
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Printed $printedCount selected label(s).'),
+        backgroundColor: Colors.green.shade800,
+      ),
+    );
   }
 
   Future<void> _deleteItem(InventoryItem item) async {
@@ -649,213 +548,66 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     );
   }
 
-  void _showSettingsDialog() async {
-    final ipCtrl = TextEditingController(text: _printerIp);
-    final portCtrl = TextEditingController(text: _printerPort.toString());
-    final usbPortCtrl = TextEditingController(text: _printerUsbPort);
+  void _showSettingsDialog() {
     final httpPortCtrl = TextEditingController(text: _httpServerPort.toString());
-
-    List<String> installedPrinters = [];
-    try {
-      installedPrinters = await TSPLPrinter.getInstalledWindowsPrinters();
-    } catch (_) {}
-
-    if (!mounted) return;
 
     showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDlgState) => AlertDialog(
-          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-          title: const Row(
-            children: [
-              Icon(Icons.print, color: Color(0xFF0F172A)),
-              SizedBox(width: 8),
-              Text('Label Printer & Network Settings', style: TextStyle(fontWeight: FontWeight.bold)),
-            ],
-          ),
-          content: SizedBox(
-            width: 420,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('USB Label Printer (HPRT HT800)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 6),
-                  if (installedPrinters.isNotEmpty) ...[
-                    DropdownButtonFormField<String>(
-                      initialValue: installedPrinters.contains(usbPortCtrl.text.trim()) ? usbPortCtrl.text.trim() : null,
-                      decoration: const InputDecoration(
-                        labelText: 'Select Installed Windows USB Printer',
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      ),
-                      hint: const Text('Select Installed Printer Driver...'),
-                      items: installedPrinters.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-                      onChanged: (val) {
-                        if (val != null) {
-                          setDlgState(() => usbPortCtrl.text = val);
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  TextField(
-                    controller: usbPortCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'USB Printer / COM Port / Driver Name',
-                      hintText: 'e.g. HPRT HT800, HPRT, or COM3',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0F172A),
-                      foregroundColor: Colors.white,
-                      minimumSize: const Size.fromHeight(40),
-                      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-                    ),
-                    onPressed: () async {
-                      final testItem = InventoryItem(
-                        barcode: 'TEST1008',
-                        itemName: 'Test Ring',
-                        category: 'Test',
-                        purity: '22K',
-                        weight: 1.0000,
-                      );
-                      final testOk = await TSPLPrinter.sendTSPLToPrinter(
-                        testItem,
-                        host: ipCtrl.text.trim(),
-                        port: int.tryParse(portCtrl.text.trim()) ?? 9100,
-                        usbPortName: usbPortCtrl.text.trim(),
-                      );
-                      if (!ctx.mounted) return;
-                      if (testOk) {
-                        showDialog(
-                          context: ctx,
-                          builder: (c2) => AlertDialog(
-                            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-                            title: const Row(
-                              children: [
-                                Icon(Icons.check_circle, color: Colors.green),
-                                SizedBox(width: 8),
-                                Text('Printer Connected!'),
-                              ],
-                            ),
-                            content: Text('Test label printed successfully on "${usbPortCtrl.text.trim()}".'),
-                            actions: [
-                              ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF0F172A),
-                                  foregroundColor: Colors.white,
-                                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-                                ),
-                                onPressed: () => Navigator.of(c2).pop(),
-                                child: const Text('OK'),
-                              ),
-                            ],
-                          ),
-                        );
-                      } else {
-                        showDialog(
-                          context: ctx,
-                          builder: (c2) => AlertDialog(
-                            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-                            title: const Row(
-                              children: [
-                                Icon(Icons.error_outline, color: Colors.red),
-                                SizedBox(width: 8),
-                                Text('Printer Disconnected'),
-                              ],
-                            ),
-                            content: Text(
-                              'Could not send test label to "${usbPortCtrl.text.trim()}".\n\n1. Verify USB cable is plugged into PC.\n2. Ensure HPRT HT800 driver is turned ON in Windows.\n3. Try selecting your printer name from dropdown.',
-                            ),
-                            actions: [
-                              ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF0F172A),
-                                  foregroundColor: Colors.white,
-                                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-                                ),
-                                onPressed: () => Navigator.of(c2).pop(),
-                                child: const Text('OK'),
-                              ),
-                            ],
-                          ),
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.print, size: 16),
-                    label: const Text('Test Print TSPL Label', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                  const SizedBox(height: 16),
-                  const Divider(),
-                  const SizedBox(height: 8),
-                  const Text('Ethernet Network Printer (Optional IP)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: ipCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Ethernet Printer IP',
-                      hintText: '192.168.1.100',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: portCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Ethernet Printer Port',
-                      hintText: '9100',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: httpPortCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'HTTP Server Port (default 8080)',
-                      hintText: '8080',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            OutlinedButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                _showAboutDialog();
-              },
-              child: const Text('About'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1E293B),
-                foregroundColor: Colors.white,
-                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-              ),
-              onPressed: () {
-                final port = int.tryParse(portCtrl.text.trim()) ?? 9100;
-                final httpPort = int.tryParse(httpPortCtrl.text.trim()) ?? 8080;
-                Navigator.of(ctx).pop();
-                _saveSettings(ipCtrl.text.trim(), port, usbPortCtrl.text.trim(), httpPort);
-              },
-              child: const Text('Save'),
-            ),
+      builder: (ctx) => AlertDialog(
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+        title: const Row(
+          children: [
+            Icon(Icons.settings, color: Color(0xFF0F172A)),
+            SizedBox(width: 8),
+            Text('Network & Server Settings', style: TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('HandPOS Sync Server Port', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: httpPortCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'HTTP Server Port (default 8080)',
+                  hintText: '8080',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          OutlinedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _showAboutDialog();
+            },
+            child: const Text('About'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E293B),
+              foregroundColor: Colors.white,
+              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            ),
+            onPressed: () {
+              final httpPort = int.tryParse(httpPortCtrl.text.trim()) ?? 8080;
+              Navigator.of(ctx).pop();
+              _saveSettings(httpPort);
+            },
+            child: const Text('Save'),
+          ),
+        ],
       ),
     );
   }
