@@ -19,11 +19,12 @@ class TSPLPrinter {
     return buffer.toString();
   }
 
-  /// Sends raw TSPL commands over TCP Socket to printer IP and Port
+  /// Sends raw TSPL commands over USB (Windows Spool/COM Port) or TCP Socket
   static Future<bool> sendTSPLToPrinter(
     InventoryItem item, {
     required String host,
     required int port,
+    String? usbPortName,
   }) async {
     if (kIsWeb) {
       debugPrint('TSPL Label generated (Web Simulation):\n${buildTSPLCommand(item)}');
@@ -32,14 +33,39 @@ class TSPLPrinter {
     final tsplStr = buildTSPLCommand(item);
     final bytes = utf8.encode(tsplStr);
 
+    // 1. Try Windows Direct USB / COM Serial Ports for HPRT HT800
+    if (Platform.isWindows) {
+      final List<String> usbTargets = [];
+      if (usbPortName != null && usbPortName.trim().isNotEmpty) {
+        usbTargets.add(usbPortName.trim());
+      }
+      usbTargets.addAll([
+        'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8',
+        '\\\\.\\COM1', '\\\\.\\COM2', '\\\\.\\COM3', '\\\\.\\COM4', '\\\\.\\COM5',
+        'LPT1', 'PRN'
+      ]);
+
+      for (var target in usbTargets) {
+        try {
+          final tempFile = File('${Directory.systemTemp.path}\\label_print.tspl');
+          await tempFile.writeAsBytes(bytes);
+          final result = await Process.run('cmd.exe', ['/c', 'copy', '/b', tempFile.path, target]);
+          if (result.exitCode == 0) {
+            return true;
+          }
+        } catch (_) {}
+      }
+    }
+
+    // 2. Try TCP Socket Connection (Ethernet / WiFi / USB Virtual IP)
     try {
-      final socket = await Socket.connect(host, port, timeout: const Duration(seconds: 3));
+      final socket = await Socket.connect(host, port, timeout: const Duration(seconds: 2));
       socket.add(bytes);
       await socket.flush();
       await socket.close();
       return true;
-    } catch (e) {
-      return false;
-    }
+    } catch (_) {}
+
+    return false;
   }
 }

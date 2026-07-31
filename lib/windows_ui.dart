@@ -36,6 +36,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
   // Settings State
   String _printerIp = '192.168.1.100';
   int _printerPort = 9100;
+  String _printerUsbPort = 'COM3';
   int _httpServerPort = 8080;
 
   String get _finalCategory {
@@ -68,20 +69,23 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
       setState(() {
         _printerIp = prefs.getString('printer_ip') ?? '192.168.1.100';
         _printerPort = prefs.getInt('printer_port') ?? 9100;
+        _printerUsbPort = prefs.getString('printer_usb_port') ?? 'COM3';
         _httpServerPort = prefs.getInt('http_server_port') ?? 8080;
       });
     } catch (_) {}
   }
 
-  Future<void> _saveSettings(String ip, int port, int httpPort) async {
+  Future<void> _saveSettings(String ip, int port, String usbPort, int httpPort) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('printer_ip', ip);
       await prefs.setInt('printer_port', port);
+      await prefs.setString('printer_usb_port', usbPort);
       await prefs.setInt('http_server_port', httpPort);
       setState(() {
         _printerIp = ip;
         _printerPort = port;
+        _printerUsbPort = usbPort;
         _httpServerPort = httpPort;
       });
       if (mounted) {
@@ -214,6 +218,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
       item,
       host: _printerIp,
       port: _printerPort,
+      usbPortName: _printerUsbPort,
     );
 
     if (!mounted) return;
@@ -268,6 +273,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
       item,
       host: _printerIp,
       port: _printerPort,
+      usbPortName: _printerUsbPort,
     );
 
     if (!mounted) return;
@@ -304,6 +310,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
         item,
         host: _printerIp,
         port: _printerPort,
+        usbPortName: _printerUsbPort,
       );
       if (ok) {
         printedCount++;
@@ -614,6 +621,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
   void _showSettingsDialog() {
     final ipCtrl = TextEditingController(text: _printerIp);
     final portCtrl = TextEditingController(text: _printerPort.toString());
+    final usbPortCtrl = TextEditingController(text: _printerUsbPort);
     final httpPortCtrl = TextEditingController(text: _httpServerPort.toString());
 
     showDialog(
@@ -622,14 +630,23 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
         title: const Text('Settings'),
         content: SizedBox(
-          width: 340,
+          width: 360,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
+                controller: usbPortCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'USB Printer Port / COM Port (HPRT HT800)',
+                  hintText: 'COM3 (or COM1, COM2, COM4, LPT1)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
                 controller: ipCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Label Printer IP',
+                  labelText: 'Ethernet Printer IP (Optional Network)',
                   hintText: '192.168.1.100',
                   border: OutlineInputBorder(),
                 ),
@@ -639,7 +656,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                 controller: portCtrl,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
-                  labelText: 'Label Printer Port',
+                  labelText: 'Ethernet Printer Port',
                   hintText: '9100',
                   border: OutlineInputBorder(),
                 ),
@@ -679,7 +696,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
               final port = int.tryParse(portCtrl.text.trim()) ?? 9100;
               final httpPort = int.tryParse(httpPortCtrl.text.trim()) ?? 8080;
               Navigator.of(ctx).pop();
-              _saveSettings(ipCtrl.text.trim(), port, httpPort);
+              _saveSettings(ipCtrl.text.trim(), port, usbPortCtrl.text.trim(), httpPort);
             },
             child: const Text('Save'),
           ),
