@@ -48,8 +48,8 @@ class TSPLPrinter {
                 child: pw.BarcodeWidget(
                   barcode: pw.Barcode.code128(),
                   data: item.barcode,
-                  width: 100,
-                  height: 26,
+                  width: 95,
+                  height: 28,
                   drawText: true,
                   textStyle: pw.TextStyle(
                     fontSize: 7.5,
@@ -66,8 +66,22 @@ class TSPLPrinter {
     return pdf.save();
   }
 
-  /// Directly opens Windows Native Printing Window with 38mm x 25mm setup
-  static Future<bool> sendTSPLToPrinter(InventoryItem item) async {
+  /// Fetch list of all installed Windows printer names
+  static Future<List<String>> getInstalledWindowsPrinters() async {
+    if (kIsWeb) return [];
+    try {
+      final printers = await Printing.listPrinters();
+      return printers.map((p) => p.name).toList();
+    } catch (_) {}
+    return [];
+  }
+
+  /// Print label directly to saved printer in 1 click or open print window
+  static Future<bool> sendTSPLToPrinter(
+    InventoryItem item, {
+    String? selectedPrinterName,
+    bool showPrintDialog = false,
+  }) async {
     if (kIsWeb) {
       debugPrint('Label printed (Web Simulation)');
       return true;
@@ -75,18 +89,61 @@ class TSPLPrinter {
 
     try {
       final pdfBytes = await generateLabelPdfBytes(item);
+      final labelFormat = PdfPageFormat(
+        38 * PdfPageFormat.mm,
+        25 * PdfPageFormat.mm,
+        marginAll: 1.5 * PdfPageFormat.mm,
+      );
+
+      // If user wants to open print dialog explicitly
+      if (showPrintDialog) {
+        await Printing.layoutPdf(
+          onLayout: (PdfPageFormat format) async => pdfBytes,
+          name: 'JewelPOS_Label_${item.barcode}',
+          format: labelFormat,
+        );
+        return true;
+      }
+
+      // 1-Click Direct Print to Saved / Default Printer
+      final printers = await Printing.listPrinters();
+      Printer? targetPrinter;
+
+      if (selectedPrinterName != null && selectedPrinterName.trim().isNotEmpty) {
+        final query = selectedPrinterName.trim().toLowerCase();
+        for (var p in printers) {
+          if (p.name.toLowerCase().contains(query)) {
+            targetPrinter = p;
+            break;
+          }
+        }
+      }
+
+      if (targetPrinter == null && printers.isNotEmpty) {
+        targetPrinter = printers.firstWhere(
+          (p) => p.isDefault,
+          orElse: () => printers.first,
+        );
+      }
+
+      if (targetPrinter != null) {
+        final printed = await Printing.directPrintPdf(
+          printer: targetPrinter,
+          onLayout: (PdfPageFormat format) async => pdfBytes,
+          format: labelFormat,
+        );
+        if (printed) return true;
+      }
+
+      // Fallback if direct print was unhandled
       await Printing.layoutPdf(
         onLayout: (PdfPageFormat format) async => pdfBytes,
         name: 'JewelPOS_Label_${item.barcode}',
-        format: PdfPageFormat(
-          38 * PdfPageFormat.mm,
-          25 * PdfPageFormat.mm,
-          marginAll: 1.5 * PdfPageFormat.mm,
-        ),
+        format: labelFormat,
       );
       return true;
     } catch (e) {
-      debugPrint('Printing layout exception: $e');
+      debugPrint('Printing exception: $e');
       return false;
     }
   }
