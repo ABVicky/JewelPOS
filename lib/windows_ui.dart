@@ -615,23 +615,30 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
       builder: (ctx) => AlertDialog(
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
         title: const Text('About Jewel POS', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: const SizedBox(
+        content: SizedBox(
           width: 400,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Jewellery Inventory Management System', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-              SizedBox(height: 4),
-              Text('Version 1.0.0 (Production Release)', style: TextStyle(color: Colors.grey, fontSize: 12)),
-              Divider(height: 24),
-              Text('ARS Technologies', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
-              SizedBox(height: 8),
-              Text('Customer care number : 8584862931', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-              SizedBox(height: 4),
-              Text('Customer care Email ID : customercare@arstechnologies.org', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-              SizedBox(height: 4),
-              Text('Sales : 8584862939', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              Center(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.asset('assets/images/logo.png', height: 85, fit: BoxFit.contain),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text('Jewellery Inventory Management System', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              const SizedBox(height: 4),
+              const Text('Version 1.0.0 (Production Release)', style: TextStyle(color: Colors.grey, fontSize: 12)),
+              const Divider(height: 24),
+              const Text('ARS Technologies', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
+              const SizedBox(height: 8),
+              const Text('Customer care number : 8584862931', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              const Text('Customer care Email ID : customercare@arstechnologies.org', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              const Text('Sales : 8584862939', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
             ],
           ),
         ),
@@ -845,7 +852,10 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
-              const Icon(Icons.diamond, color: Colors.amber, size: 20),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Image.asset('assets/images/logo.png', height: 26, width: 26, fit: BoxFit.cover),
+              ),
               const SizedBox(width: 8),
               const Text(
                 'JEWELLERY INVENTORY MANAGEMENT',
