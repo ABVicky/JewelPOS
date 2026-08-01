@@ -35,8 +35,6 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
 
   // Settings State
   int _httpServerPort = 8080;
-  String _selectedPrinterName = '';
-  bool _showPrintDialogAlways = false;
 
   String get _finalCategory {
     if (_selectedCategoryOption == 'Others') {
@@ -67,22 +65,16 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
         _httpServerPort = prefs.getInt('http_server_port') ?? 8080;
-        _selectedPrinterName = prefs.getString('selected_printer_name') ?? '';
-        _showPrintDialogAlways = prefs.getBool('show_print_dialog_always') ?? false;
       });
     } catch (_) {}
   }
 
-  Future<void> _saveSettings(int httpPort, String printerName, bool showDialogAlways) async {
+  Future<void> _saveSettings(int httpPort) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('http_server_port', httpPort);
-      await prefs.setString('selected_printer_name', printerName);
-      await prefs.setBool('show_print_dialog_always', showDialogAlways);
       setState(() {
         _httpServerPort = httpPort;
-        _selectedPrinterName = printerName;
-        _showPrintDialogAlways = showDialogAlways;
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -210,11 +202,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     }
 
     // 2. Direct label printing
-    bool printSuccess = await TSPLPrinter.sendTSPLToPrinter(
-      item,
-      selectedPrinterName: _selectedPrinterName,
-      showPrintDialog: _showPrintDialogAlways,
-    );
+    bool printSuccess = await TSPLPrinter.sendTSPLToPrinter(item);
 
     if (!mounted) return;
 
@@ -236,11 +224,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
   }
 
   Future<void> _reprintLabel(InventoryItem item) async {
-    bool printSuccess = await TSPLPrinter.sendTSPLToPrinter(
-      item,
-      selectedPrinterName: _selectedPrinterName,
-      showPrintDialog: _showPrintDialogAlways,
-    );
+    bool printSuccess = await TSPLPrinter.sendTSPLToPrinter(item);
 
     if (!mounted) return;
 
@@ -270,25 +254,18 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     }
 
     final itemsToPrint = _allItems.where((item) => _selectedBarcodes.contains(item.barcode)).toList();
-    int printedCount = 0;
-
-    for (var item in itemsToPrint) {
-      bool ok = await TSPLPrinter.sendTSPLToPrinter(
-        item,
-        selectedPrinterName: _selectedPrinterName,
-        showPrintDialog: _showPrintDialogAlways,
-      );
-      if (ok) printedCount++;
-    }
+    bool ok = await TSPLPrinter.sendMultipleTSPLToPrinter(itemsToPrint);
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Printed $printedCount selected label(s).'),
-        backgroundColor: Colors.green.shade800,
-      ),
-    );
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Opening print window for ${itemsToPrint.length} selected label(s)...'),
+          backgroundColor: Colors.green.shade800,
+        ),
+      );
+    }
   }
 
   Future<void> _deleteItem(InventoryItem item) async {
@@ -568,107 +545,66 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     );
   }
 
-  void _showSettingsDialog() async {
+  void _showSettingsDialog() {
     final httpPortCtrl = TextEditingController(text: _httpServerPort.toString());
-    String tempPrinter = _selectedPrinterName;
-    bool tempShowDialog = _showPrintDialogAlways;
-
-    List<String> installedPrinters = [];
-    try {
-      installedPrinters = await TSPLPrinter.getInstalledWindowsPrinters();
-    } catch (_) {}
-
-    if (!mounted) return;
 
     showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDlgState) => AlertDialog(
-          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-          title: const Row(
-            children: [
-              Icon(Icons.settings, color: Color(0xFF0F172A)),
-              SizedBox(width: 8),
-              Text('Label Printer & Network Settings', style: TextStyle(fontWeight: FontWeight.bold)),
-            ],
-          ),
-          content: SizedBox(
-            width: 400,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Saved Label Printer (1-Click Print)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    initialValue: installedPrinters.contains(tempPrinter) ? tempPrinter : (installedPrinters.isNotEmpty ? installedPrinters.first : null),
-                    decoration: const InputDecoration(
-                      labelText: 'Select Printer for Automatic 1-Click Print',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    ),
-                    hint: const Text('Default System Printer'),
-                    items: installedPrinters.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-                    onChanged: (val) {
-                      if (val != null) {
-                        setDlgState(() => tempPrinter = val);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  SwitchListTile(
-                    title: const Text('Always open Windows print window', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                    subtitle: const Text('If ON, opens Win + P print setup on every print click', style: TextStyle(fontSize: 11)),
-                    value: tempShowDialog,
-                    onChanged: (val) => setDlgState(() => tempShowDialog = val),
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                  const SizedBox(height: 12),
-                  const Divider(),
-                  const SizedBox(height: 8),
-                  const Text('HandPOS Sync Server Port', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: httpPortCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'HTTP Server Port (default 8080)',
-                      hintText: '8080',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            OutlinedButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                _showAboutDialog();
-              },
-              child: const Text('About'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1E293B),
-                foregroundColor: Colors.white,
-                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-              ),
-              onPressed: () {
-                final httpPort = int.tryParse(httpPortCtrl.text.trim()) ?? 8080;
-                Navigator.of(ctx).pop();
-                _saveSettings(httpPort, tempPrinter, tempShowDialog);
-              },
-              child: const Text('Save Settings'),
-            ),
+      builder: (ctx) => AlertDialog(
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+        title: const Row(
+          children: [
+            Icon(Icons.settings, color: Color(0xFF0F172A)),
+            SizedBox(width: 8),
+            Text('Network & Server Settings', style: TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('HandPOS Sync Server Port', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: httpPortCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'HTTP Server Port (default 8080)',
+                  hintText: '8080',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          OutlinedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _showAboutDialog();
+            },
+            child: const Text('About'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E293B),
+              foregroundColor: Colors.white,
+              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            ),
+            onPressed: () {
+              final httpPort = int.tryParse(httpPortCtrl.text.trim()) ?? 8080;
+              Navigator.of(ctx).pop();
+              _saveSettings(httpPort);
+            },
+            child: const Text('Save'),
+          ),
+        ],
       ),
     );
   }
