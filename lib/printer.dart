@@ -34,7 +34,7 @@ class TSPLPrinter {
                 pw.Text(
                   '${item.itemName} (${item.category})',
                   style: pw.TextStyle(
-                    fontSize: 9.5,
+                    fontSize: 8.5,
                     fontWeight: pw.FontWeight.bold,
                   ),
                   maxLines: 1,
@@ -43,7 +43,7 @@ class TSPLPrinter {
                 pw.Text(
                   'Pur: ${item.purity}  Wt: ${item.weight.toStringAsFixed(4)} g',
                   style: pw.TextStyle(
-                    fontSize: 8.5,
+                    fontSize: 8,
                     fontWeight: pw.FontWeight.bold,
                   ),
                   maxLines: 1,

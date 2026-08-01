@@ -614,20 +614,26 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-        title: const Text('About Jewel POS'),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Jewellery Inventory Management System', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            SizedBox(height: 8),
-            Text('Target: Windows Desktop Workstation'),
-            Text('Database: SQLite (inventory.db)'),
-            Text('Printer Protocol: TSPL Raw (HPRT HT800)'),
-            Text('HTTP Server: Port 8080 (Local WiFi API)'),
-            SizedBox(height: 8),
-            Text('Version 1.0.0 (Production Release)'),
-          ],
+        title: const Text('About Jewel POS', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const SizedBox(
+          width: 400,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Jewellery Inventory Management System', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              SizedBox(height: 4),
+              Text('Version 1.0.0 (Production Release)', style: TextStyle(color: Colors.grey, fontSize: 12)),
+              Divider(height: 24),
+              Text('ARS Technologies', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
+              SizedBox(height: 8),
+              Text('Customer care number : 8584862931', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              SizedBox(height: 4),
+              Text('Customer care Email ID : customercare@arstechnologies.org', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              SizedBox(height: 4),
+              Text('Sales : 8584862939', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            ],
+          ),
         ),
         actions: [
           ElevatedButton(

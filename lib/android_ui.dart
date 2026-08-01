@@ -857,6 +857,47 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
   // Calculate Totals
   double get _totalWeight => _scannedItems.fold(0.0, (sum, item) => sum + item.weight);
 
+  void _showAboutDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+        title: const Text('About Jewel POS', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const SizedBox(
+          width: 380,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Jewellery Inventory & POS System', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              SizedBox(height: 4),
+              Text('Hand POS Terminal Edition (Model 1008)', style: TextStyle(color: Colors.grey, fontSize: 12)),
+              Divider(height: 24),
+              Text('ARS Technologies', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
+              SizedBox(height: 8),
+              Text('Customer care number : 8584862931', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              SizedBox(height: 4),
+              Text('Customer care Email ID : customercare@arstechnologies.org', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              SizedBox(height: 4),
+              Text('Sales : 8584862939', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.black,
+              foregroundColor: Colors.white,
+              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -867,6 +908,11 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
         elevation: 0,
         title: const Text('JEWEL POS (Smart POS 1008)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            tooltip: 'About',
+            onPressed: _showAboutDialog,
+          ),
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: 'Settings',

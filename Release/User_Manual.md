@@ -39,3 +39,15 @@ Written for Jewellery Shop Owners. Simple, clear, and easy to follow.
 3. The item details (Name, Weight, Barcode) will automatically appear in your temporary list and update the total items and weight.
 4. Tap **Print Receipt** to print an ESC/POS thermal receipt.
 5. After printing, confirm whether to clear the list for the next customer.
+
+---
+
+## 5. Customer Support (ARS Technologies)
+
+For technical support, assistance, or sales inquiries:
+
+- **Company**: ARS Technologies
+- **Customer Care Number**: 8584862931
+- **Customer Care Email ID**: customercare@arstechnologies.org
+- **Sales**: 8584862939
+
