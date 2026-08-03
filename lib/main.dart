@@ -1,3 +1,8 @@
+/*
+ * Designed and Developed by Manikarnika Technologies
+ * Website: https://www.manikarnikatechnologies.in
+ */
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';

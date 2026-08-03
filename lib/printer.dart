@@ -1,3 +1,8 @@
+/*
+ * Designed and Developed by Manikarnika Technologies
+ * Website: https://www.manikarnikatechnologies.in
+ */
+
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
