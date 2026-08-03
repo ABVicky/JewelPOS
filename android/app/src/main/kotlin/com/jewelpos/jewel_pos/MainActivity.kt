@@ -2,6 +2,8 @@ package com.jewelpos.jewel_pos
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -89,6 +91,13 @@ class MainActivity : FlutterActivity() {
         val printManager = getSystemService(Context.PRINT_SERVICE) as PrintManager
         val jobName = "JewelPOS_Receipt_${System.currentTimeMillis()}"
 
+        val logoBitmap = try {
+            val isStream = assets.open("flutter_assets/assets/images/jewel_logo.png")
+            BitmapFactory.decodeStream(isStream)
+        } catch (_: Exception) {
+            null
+        }
+
         printManager.print(jobName, object : PrintDocumentAdapter() {
             private var pdfDocument: PdfDocument? = null
 
@@ -109,9 +118,40 @@ class MainActivity : FlutterActivity() {
                 paint.textSize = 10f
 
                 var y = 20f
+
+                if (logoBitmap != null) {
+                    val targetWidth = 100f
+                    val scale = targetWidth / logoBitmap.width.toFloat()
+                    val targetHeight = logoBitmap.height.toFloat() * scale
+                    val x = (200f - targetWidth) / 2f
+                    val scaledLogo = Bitmap.createScaledBitmap(
+                        logoBitmap, targetWidth.toInt(), targetHeight.toInt(), true
+                    )
+                    canvas.drawBitmap(scaledLogo, x, y, paint)
+                    y += targetHeight + 10f
+                }
+
                 val lines = receiptText.split("\n")
                 for (line in lines) {
-                    canvas.drawText(line, 10f, y, paint)
+                    val trimmed = line.trim()
+                    if (trimmed == "JEWEL POS" || trimmed.startsWith("===") || trimmed.startsWith("---") || trimmed == "Thank You") {
+                        paint.textAlign = Paint.Align.CENTER
+                        canvas.drawText(trimmed, 100f, y, paint)
+                    } else if (trimmed.isNotEmpty()) {
+                        // Split left column (Item Name / Label) and right column (Weight / Value)
+                        val spaceIndex = line.lastIndexOf("  ")
+                        if (spaceIndex > 0) {
+                            val left = line.substring(0, spaceIndex).trim()
+                            val right = line.substring(spaceIndex).trim()
+                            paint.textAlign = Paint.Align.LEFT
+                            canvas.drawText(left, 10f, y, paint)
+                            paint.textAlign = Paint.Align.RIGHT
+                            canvas.drawText(right, 190f, y, paint)
+                        } else {
+                            paint.textAlign = Paint.Align.LEFT
+                            canvas.drawText(line, 10f, y, paint)
+                        }
+                    }
                     y += 14f
                 }
 

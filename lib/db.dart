@@ -49,6 +49,50 @@ class InventoryItem {
   }
 }
 
+class PrintLog {
+  final int? id;
+  final String terminalName;
+  final String date;
+  final String timestamp;
+  final int totalItems;
+  final double totalWeight;
+  final String itemsJson;
+
+  PrintLog({
+    this.id,
+    required this.terminalName,
+    required this.date,
+    required this.timestamp,
+    required this.totalItems,
+    required this.totalWeight,
+    required this.itemsJson,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      if (id != null) 'id': id,
+      'terminal_name': terminalName,
+      'date': date,
+      'timestamp': timestamp,
+      'total_items': totalItems,
+      'total_weight': totalWeight,
+      'items_json': itemsJson,
+    };
+  }
+
+  factory PrintLog.fromMap(Map<String, dynamic> map) {
+    return PrintLog(
+      id: map['id'] as int?,
+      terminalName: map['terminal_name'] as String? ?? 'Terminal POS',
+      date: map['date'] as String? ?? '',
+      timestamp: map['timestamp'] as String? ?? '',
+      totalItems: (map['total_items'] as num?)?.toInt() ?? 0,
+      totalWeight: (map['total_weight'] as num?)?.toDouble() ?? 0.0,
+      itemsJson: map['items_json'] as String? ?? '[]',
+    );
+  }
+}
+
 class InventoryDB {
   static Database? _db;
 
@@ -71,22 +115,23 @@ class InventoryDB {
   static Future<Database> _initDB() async {
     if (kIsWeb) {
       databaseFactory = databaseFactoryFfiWeb;
-      return await openDatabase('inventory.db', version: 1, onCreate: _onCreate);
+      return await openDatabase('inventory.db', version: 2, onCreate: _onCreate, onUpgrade: _onUpgrade);
     } else {
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
       final path = await getDatabasePath();
       return await openDatabase(
         path,
-        version: 1,
+        version: 2,
         onCreate: _onCreate,
+        onUpgrade: _onUpgrade,
       );
     }
   }
 
   static Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
-      CREATE TABLE Inventory (
+      CREATE TABLE IF NOT EXISTS Inventory (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         barcode TEXT UNIQUE,
         item_name TEXT,
@@ -94,6 +139,31 @@ class InventoryDB {
         purity TEXT,
         weight REAL,
         created_at TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS PrintLogs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        terminal_name TEXT,
+        date TEXT,
+        timestamp TEXT,
+        total_items INTEGER,
+        total_weight REAL,
+        items_json TEXT
+      )
+    ''');
+  }
+
+  static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS PrintLogs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        terminal_name TEXT,
+        date TEXT,
+        timestamp TEXT,
+        total_items INTEGER,
+        total_weight REAL,
+        items_json TEXT
       )
     ''');
   }
@@ -156,6 +226,29 @@ class InventoryDB {
       ORDER BY id DESC
     ''', [q, q, q]);
     return res.map((map) => InventoryItem.fromMap(map)).toList();
+  }
+
+  // --- PRINT LOG DATABASE METHODS ---
+  static Future<int> insertPrintLog(PrintLog log) async {
+    final db = await instance;
+    return await db.insert('PrintLogs', log.toMap());
+  }
+
+  static Future<List<PrintLog>> getPrintLogsByDate(String date) async {
+    final db = await instance;
+    final res = await db.query(
+      'PrintLogs',
+      where: 'date = ?',
+      whereArgs: [date],
+      orderBy: 'id DESC',
+    );
+    return res.map((map) => PrintLog.fromMap(map)).toList();
+  }
+
+  static Future<List<String>> getDistinctPrintDates() async {
+    final db = await instance;
+    final res = await db.rawQuery('SELECT DISTINCT date FROM PrintLogs ORDER BY date DESC');
+    return res.map((row) => row['date'] as String? ?? '').where((d) => d.isNotEmpty).toList();
   }
 
   static Future<String> backupDatabase() async {

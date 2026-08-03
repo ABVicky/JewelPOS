@@ -1,12 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:printing/printing.dart';
+import 'db.dart';
+import 'printer.dart';
 
 class ScannedPosItem {
   final String barcode;
@@ -425,7 +429,65 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
   }
 
   // --- ESC/POS RECEIPT PRINTING (BUILT-IN 58MM THERMAL PRINTER FOR SMART POS 1008) ---
-  List<int> _generateEscPosBytes({List<ScannedPosItem>? customList}) {
+  List<int>? _cachedLogoEscBytes;
+
+  Future<List<int>> _getLogoEscPosBytes() async {
+    if (_cachedLogoEscBytes != null) return _cachedLogoEscBytes!;
+    try {
+      final ByteData data = await rootBundle.load('assets/images/jewel_logo.png');
+      final Uint8List bytes = data.buffer.asUint8List();
+      final ui.Codec codec = await ui.instantiateImageCodec(bytes, targetWidth: 256);
+      final ui.FrameInfo frame = await codec.getNextFrame();
+      final ui.Image image = frame.image;
+      final ByteData? rgbaData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (rgbaData == null) return [];
+
+      final int width = image.width;
+      final int height = image.height;
+      final int widthBytes = (width + 7) ~/ 8;
+
+      final List<int> escPos = [];
+      // GS v 0 0 (raster bit image, normal mode)
+      escPos.addAll([
+        0x1D, 0x76, 0x30, 0x00,
+        widthBytes & 0xFF,
+        (widthBytes >> 8) & 0xFF,
+        height & 0xFF,
+        (height >> 8) & 0xFF,
+      ]);
+
+      final Uint8List rgba = rgbaData.buffer.asUint8List();
+      for (int y = 0; y < height; y++) {
+        for (int xByte = 0; xByte < widthBytes; xByte++) {
+          int byteVal = 0;
+          for (int bit = 0; bit < 8; bit++) {
+            int x = xByte * 8 + bit;
+            if (x < width) {
+              int offset = (y * width + x) * 4;
+              int r = rgba[offset];
+              int g = rgba[offset + 1];
+              int b = rgba[offset + 2];
+              int a = rgba[offset + 3];
+              if (a > 64) {
+                double luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+                if (luminance < 160) {
+                  byteVal |= (0x80 >> bit);
+                }
+              }
+            }
+          }
+          escPos.add(byteVal);
+        }
+      }
+      _cachedLogoEscBytes = escPos;
+      return escPos;
+    } catch (e) {
+      debugPrint('Error loading logo for receipt printing: $e');
+      return [];
+    }
+  }
+
+  Future<List<int>> _generateEscPosBytes({List<ScannedPosItem>? customList}) async {
     final itemsToPrint = customList ?? _scannedItems;
     final bytes = <int>[];
 
@@ -433,6 +495,14 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     bytes.addAll([0x1B, 0x40]);
     // Center Align
     bytes.addAll([0x1B, 0x61, 0x01]);
+
+    // Print Logo at the top of the receipt
+    final logoEscBytes = await _getLogoEscPosBytes();
+    if (logoEscBytes.isNotEmpty) {
+      bytes.addAll(logoEscBytes);
+      bytes.addAll(utf8.encode("\n"));
+    }
+
     // Double height & width header
     bytes.addAll([0x1B, 0x21, 0x30]);
     bytes.addAll(utf8.encode("JEWEL POS\n"));
@@ -451,13 +521,13 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       final nameStr = item.itemName.length > 20
           ? item.itemName.substring(0, 20)
           : item.itemName.padRight(20);
-      final wtStr = "${item.weight.toStringAsFixed(4)} g".padLeft(12);
+      final wtStr = "${item.weight.toStringAsFixed(3)} g".padLeft(12);
       bytes.addAll(utf8.encode("$nameStr$wtStr\n"));
     }
 
     bytes.addAll(utf8.encode("--------------------------------\n"));
     final countStr = itemsToPrint.length.toString();
-    final totWtStr = "${totalWeight.toStringAsFixed(4)} g";
+    final totWtStr = "${totalWeight.toStringAsFixed(3)} g";
 
     final countPad = ' ' * (32 - "Items".length - countStr.length);
     bytes.addAll(utf8.encode("Items$countPad$countStr\n"));
@@ -481,7 +551,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
   Future<bool> _sendToBuiltInPrinter({List<ScannedPosItem>? customList}) async {
     if (kIsWeb) return true;
 
-    final bytes = Uint8List.fromList(_generateEscPosBytes(customList: customList));
+    final bytes = Uint8List.fromList(await _generateEscPosBytes(customList: customList));
 
     // 1. Invoke Native Android MethodChannel (Serial & Native Port scanner)
     try {
@@ -526,12 +596,12 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       final nameStr = item.itemName.length > 20
           ? item.itemName.substring(0, 20)
           : item.itemName.padRight(20);
-      final wtStr = "${item.weight.toStringAsFixed(4)} g".padLeft(12);
+      final wtStr = "${item.weight.toStringAsFixed(3)} g".padLeft(12);
       sb.writeln("$nameStr$wtStr");
     }
     sb.writeln("--------------------------------");
     final countStr = itemsToPrint.length.toString();
-    final totWtStr = "${totalWeight.toStringAsFixed(4)} g";
+    final totWtStr = "${totalWeight.toStringAsFixed(3)} g";
 
     final countPad = ' ' * (32 - "Items".length - countStr.length);
     sb.writeln("Items$countPad$countStr");
@@ -541,7 +611,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     sb.writeln("================================");
     sb.writeln("Thank You");
 
-    final bytes = Uint8List.fromList(_generateEscPosBytes(customList: customList));
+    final bytes = Uint8List.fromList(await _generateEscPosBytes(customList: customList));
 
     try {
       final bool? result = await _printerChannel.invokeMethod<bool>('printText', {
@@ -553,6 +623,230 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       debugPrint('Android PrintManager error: $e');
     }
     return false;
+  }
+
+  Future<void> _recordPrintLog(List<ScannedPosItem> itemsToPrint) async {
+    try {
+      final now = DateTime.now();
+      final dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+      double totalWeight = 0.0;
+      for (var item in itemsToPrint) {
+        totalWeight += item.weight;
+      }
+
+      final log = PrintLog(
+        terminalName: _terminalName.isNotEmpty ? _terminalName : 'POS Terminal',
+        date: dateStr,
+        timestamp: now.toIso8601String(),
+        totalItems: itemsToPrint.length,
+        totalWeight: totalWeight,
+        itemsJson: jsonEncode(itemsToPrint.map((i) => {
+          'barcode': i.barcode,
+          'itemName': i.itemName,
+          'category': i.category,
+          'purity': i.purity,
+          'weight': i.weight,
+        }).toList()),
+      );
+
+      // Save locally to SQLite database
+      await InventoryDB.insertPrintLog(log);
+
+      // HTTP Sync to Desktop Server if connected
+      if (_isConnectedToDesktop && _desktopIp.isNotEmpty) {
+        try {
+          final url = Uri.parse('http://$_desktopIp:8080/print-log');
+          await http.post(
+            url,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(log.toMap()),
+          ).timeout(const Duration(seconds: 2));
+        } catch (_) {}
+      }
+    } catch (e) {
+      debugPrint('Error recording print log: $e');
+    }
+  }
+
+  Future<void> _showDailyReportDialog() async {
+    final now = DateTime.now();
+    String selectedDate = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return FutureBuilder<List<PrintLog>>(
+              future: InventoryDB.getPrintLogsByDate(selectedDate),
+              builder: (context, snapshot) {
+                final logs = snapshot.data ?? [];
+                int totalItems = 0;
+                double totalWeight = 0.0;
+                final Map<String, int> termCounts = {};
+                final Map<String, double> termWeights = {};
+
+                for (var log in logs) {
+                  totalItems += log.totalItems;
+                  totalWeight += log.totalWeight;
+                  termCounts[log.terminalName] = (termCounts[log.terminalName] ?? 0) + 1;
+                  termWeights[log.terminalName] = (termWeights[log.terminalName] ?? 0.0) + log.totalWeight;
+                }
+
+                return AlertDialog(
+                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                  title: const Row(
+                    children: [
+                      Icon(Icons.assessment, color: Colors.black),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text('Day-Wise Print Log Report', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ),
+                    ],
+                  ),
+                  content: SizedBox(
+                    width: double.maxFinite,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              const Text('Date: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                              Text(selectedDate, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+                              const Spacer(),
+                              IconButton(
+                                icon: const Icon(Icons.calendar_today, size: 18),
+                                onPressed: () async {
+                                  final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: DateTime.tryParse(selectedDate) ?? DateTime.now(),
+                                    firstDate: DateTime(2020),
+                                    lastDate: DateTime(2100),
+                                  );
+                                  if (picked != null) {
+                                    final newDate = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
+                                    setStateDialog(() {
+                                      selectedDate = newDate;
+                                    });
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                          const Divider(),
+                          Container(
+                            color: const Color(0xFFF1F5F9),
+                            padding: const EdgeInsets.all(10),
+                            child: Column(
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text('Total Receipts:', style: TextStyle(fontWeight: FontWeight.bold)),
+                                    Text('${logs.length}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text('Total Items Billed:', style: TextStyle(fontWeight: FontWeight.bold)),
+                                    Text('$totalItems', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text('Total Net Weight:', style: TextStyle(fontWeight: FontWeight.bold)),
+                                    Text('${totalWeight.toStringAsFixed(3)} g', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black)),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (termCounts.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            const Text('Terminal Breakdown:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            const SizedBox(height: 4),
+                            ...termCounts.entries.map((e) {
+                              final wt = (termWeights[e.key] ?? 0.0).toStringAsFixed(3);
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 2),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text('${e.key} (${e.value} receipts)', style: const TextStyle(fontSize: 12)),
+                                    Text('$wt g', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
+                              );
+                            }),
+                          ],
+                          const SizedBox(height: 12),
+                          const Text('Receipt Log Entries:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          const SizedBox(height: 4),
+                          if (logs.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(8.0),
+                              child: Text('No receipt print logs recorded for this date.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                            )
+                          else
+                            ...logs.map((log) {
+                              final dt = DateTime.tryParse(log.timestamp);
+                              final timeStr = dt != null
+                                  ? "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}"
+                                  : log.timestamp;
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 6),
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: Colors.grey.shade300),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Text('$timeStr  |  ${log.terminalName}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                    const Spacer(),
+                                    Text('${log.totalItems} items (${log.totalWeight.toStringAsFixed(3)} g)', style: const TextStyle(fontSize: 11)),
+                                  ],
+                                ),
+                              );
+                            }),
+                        ],
+                      ),
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('CLOSE'),
+                    ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.black,
+                        foregroundColor: Colors.white,
+                        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                      ),
+                      onPressed: logs.isEmpty ? null : () async {
+                        final pdfBytes = await TSPLPrinter.generateDailyReportPdfBytes(selectedDate, logs);
+                        await Printing.layoutPdf(
+                          onLayout: (format) async => pdfBytes,
+                          name: 'JewelPOS_DailyReport_$selectedDate',
+                        );
+                      },
+                      icon: const Icon(Icons.print, size: 16),
+                      label: const Text('Print Final Report', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _printReceiptWithRetry() async {
@@ -574,6 +868,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     if (!mounted) return;
 
     if (printSuccess) {
+      _recordPrintLog(List.from(_scannedItems));
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -924,6 +1219,11 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.assessment),
+            tooltip: 'Daily Print Report',
+            onPressed: _showDailyReportDialog,
+          ),
           IconButton(
             icon: const Icon(Icons.info_outline),
             tooltip: 'About',

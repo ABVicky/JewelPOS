@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:barcode_widget/barcode_widget.dart';
+import 'package:printing/printing.dart';
 import 'db.dart';
 import 'printer.dart';
 import 'server_helper.dart';
@@ -323,6 +324,200 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _showDailyReportDialog() async {
+    final now = DateTime.now();
+    String selectedDate = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return FutureBuilder<List<PrintLog>>(
+              future: InventoryDB.getPrintLogsByDate(selectedDate),
+              builder: (context, snapshot) {
+                final logs = snapshot.data ?? [];
+                int totalItems = 0;
+                double totalWeight = 0.0;
+                final Map<String, int> termCounts = {};
+                final Map<String, double> termWeights = {};
+
+                for (var log in logs) {
+                  totalItems += log.totalItems;
+                  totalWeight += log.totalWeight;
+                  termCounts[log.terminalName] = (termCounts[log.terminalName] ?? 0) + 1;
+                  termWeights[log.terminalName] = (termWeights[log.terminalName] ?? 0.0) + log.totalWeight;
+                }
+
+                return AlertDialog(
+                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                  title: const Row(
+                    children: [
+                      Icon(Icons.assessment, color: Color(0xFF1E293B)),
+                      SizedBox(width: 8),
+                      Text('Day-Wise Terminal Print Log Report', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    ],
+                  ),
+                  content: SizedBox(
+                    width: 550,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              const Text('Date: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                              Text(selectedDate, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0284C7), fontSize: 15)),
+                              const Spacer(),
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF1E293B),
+                                  foregroundColor: Colors.white,
+                                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                                ),
+                                icon: const Icon(Icons.calendar_today, size: 14),
+                                label: const Text('Change Date'),
+                                onPressed: () async {
+                                  final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: DateTime.tryParse(selectedDate) ?? DateTime.now(),
+                                    firstDate: DateTime(2020),
+                                    lastDate: DateTime(2100),
+                                  );
+                                  if (picked != null) {
+                                    final newDate = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
+                                    setStateDialog(() {
+                                      selectedDate = newDate;
+                                    });
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            color: const Color(0xFFF1F5F9),
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text('Total Receipts Printed:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                    Text('${logs.length}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text('Total Items Billed:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                    Text('$totalItems', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text('Total Net Weight Billed:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                    Text('${totalWeight.toStringAsFixed(3)} g', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A))),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (termCounts.isNotEmpty) ...[
+                            const SizedBox(height: 16),
+                            const Text('Terminal Breakdown:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                            const SizedBox(height: 6),
+                            ...termCounts.entries.map((e) {
+                              final wt = (termWeights[e.key] ?? 0.0).toStringAsFixed(3);
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 4),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                color: Colors.white,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text('${e.key} (${e.value} receipts)', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                                    Text('$wt g', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                                  ],
+                                ),
+                              );
+                            }),
+                          ],
+                          const SizedBox(height: 16),
+                          const Text('Receipt Print Logs:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                          const SizedBox(height: 6),
+                          if (logs.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(12.0),
+                              child: Text('No receipt print logs recorded for this date.', style: TextStyle(color: Colors.grey, fontSize: 13)),
+                            )
+                          else
+                            Container(
+                              constraints: const BoxConstraints(maxHeight: 200),
+                              child: ListView.builder(
+                                shrinkWrap: true,
+                                itemCount: logs.length,
+                                itemBuilder: (ctx, idx) {
+                                  final log = logs[idx];
+                                  final dt = DateTime.tryParse(log.timestamp);
+                                  final timeStr = dt != null
+                                      ? "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:${dt.second.toString().padLeft(2, '0')}"
+                                      : log.timestamp;
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 4),
+                                    padding: const EdgeInsets.all(8),
+                                    color: Colors.white,
+                                    child: Row(
+                                      children: [
+                                        Text('$timeStr  |  ${log.terminalName}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                        const Spacer(),
+                                        Text('${log.totalItems} items (${log.totalWeight.toStringAsFixed(3)} g)', style: const TextStyle(fontSize: 12)),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('Close'),
+                    ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1E293B),
+                        foregroundColor: Colors.white,
+                        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      ),
+                      onPressed: logs.isEmpty ? null : () async {
+                        final pdfBytes = await TSPLPrinter.generateDailyReportPdfBytes(selectedDate, logs);
+                        await Printing.layoutPdf(
+                          onLayout: (format) async => pdfBytes,
+                          name: 'JewelPOS_DailyReport_$selectedDate',
+                        );
+                      },
+                      icon: const Icon(Icons.print, size: 16),
+                      label: const Text('Print Final Day Report', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 
@@ -886,6 +1081,12 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                 onPressed: _showConnectedTerminalsDialog,
                 icon: const Icon(Icons.phonelink, color: Colors.white, size: 16),
                 label: Text('Terminals (${DesktopHttpServer.activeOnlineTerminalsCount})', style: const TextStyle(color: Colors.white, fontSize: 13)),
+              ),
+              const SizedBox(width: 4),
+              TextButton.icon(
+                onPressed: _showDailyReportDialog,
+                icon: const Icon(Icons.assessment, color: Colors.white, size: 16),
+                label: const Text('Daily Report', style: TextStyle(color: Colors.white, fontSize: 13)),
               ),
               const SizedBox(width: 4),
               TextButton.icon(

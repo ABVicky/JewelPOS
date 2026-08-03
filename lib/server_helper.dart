@@ -207,6 +207,51 @@ class DesktopHttpServer {
       return;
     }
 
+    // 5. POST /print-log (Save receipt print event from POS terminals into central DB)
+    if (request.method == 'POST' && path == '/print-log') {
+      try {
+        final body = await utf8.decoder.bind(request).join();
+        if (body.isNotEmpty) {
+          final data = jsonDecode(body) as Map<String, dynamic>;
+          final log = PrintLog.fromMap(data);
+          await InventoryDB.insertPrintLog(log);
+          request.response.statusCode = HttpStatus.ok;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode({'status': 'logged'}));
+          await request.response.close();
+          return;
+        }
+      } catch (e) {
+        debugPrint('Error logging print event: $e');
+      }
+      request.response.statusCode = HttpStatus.badRequest;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'message': 'Invalid Payload'}));
+      await request.response.close();
+      return;
+    }
+
+    // 6. GET /print-logs (Fetch day-wise print logs)
+    if (request.method == 'GET' && path == '/print-logs') {
+      try {
+        final now = DateTime.now();
+        final defaultDate = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+        final date = request.uri.queryParameters['date'] ?? defaultDate;
+        final logs = await InventoryDB.getPrintLogsByDate(date);
+        request.response.statusCode = HttpStatus.ok;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode(logs.map((l) => l.toMap()).toList()));
+        await request.response.close();
+        return;
+      } catch (e) {
+        request.response.statusCode = HttpStatus.internalServerError;
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({'message': e.toString()}));
+        await request.response.close();
+        return;
+      }
+    }
+
     // Default 404
     request.response.statusCode = HttpStatus.notFound;
     request.response.headers.contentType = ContentType.json;
