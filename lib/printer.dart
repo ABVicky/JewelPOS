@@ -129,8 +129,8 @@ class TSPLPrinter {
 
     final pageFormat = PdfPageFormat(
       58 * PdfPageFormat.mm,
-      double.infinity,
-      marginAll: 3 * PdfPageFormat.mm,
+      200 * PdfPageFormat.mm,
+      marginAll: 2 * PdfPageFormat.mm,
     );
 
     double totalWeight = 0.0;
@@ -139,65 +139,69 @@ class TSPLPrinter {
     }
 
     pdf.addPage(
-      pw.Page(
+      pw.MultiPage(
         pageFormat: pageFormat,
         build: (pw.Context context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              if (logoImage != null) ...[
-                pw.Center(
-                  child: pw.Image(logoImage, width: 100),
-                ),
-                pw.SizedBox(height: 4),
+          return [
+            if (logoImage != null)
+              pw.Center(
+                child: pw.Image(logoImage, width: 100),
+              ),
+            pw.SizedBox(height: 4),
+            pw.Center(
+              child: pw.Text('JEWEL POS', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+            ),
+            pw.Center(
+              child: pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
+            ),
+            pw.SizedBox(height: 2),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Item Name', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                pw.Text('Weight', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
               ],
-              pw.Text('JEWEL POS', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
-              pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
-              pw.SizedBox(height: 2),
-              pw.Row(
+            ),
+            pw.Divider(thickness: 0.5),
+            ...items.map((item) {
+              final name = (item['itemName'] ?? '').toString();
+              final wt = (item['weight'] as num?)?.toDouble() ?? 0.0;
+              return pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text('Item Name', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('Weight', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                ],
-              ),
-              pw.Divider(thickness: 0.5),
-              ...items.map((item) {
-                final name = (item['itemName'] ?? '').toString();
-                final wt = (item['weight'] as num?)?.toDouble() ?? 0.0;
-                return pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Expanded(
-                      child: pw.Text(
-                        name.length > 18 ? name.substring(0, 18) : name,
-                        style: const pw.TextStyle(fontSize: 8),
-                      ),
+                  pw.Expanded(
+                    child: pw.Text(
+                      name.length > 18 ? name.substring(0, 18) : name,
+                      style: const pw.TextStyle(fontSize: 8),
                     ),
-                    pw.Text('${wt.toStringAsFixed(3)} g', style: const pw.TextStyle(fontSize: 8)),
-                  ],
-                );
-              }),
-              pw.Divider(thickness: 0.5),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('Items:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('${items.length}', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                  ),
+                  pw.Text('${wt.toStringAsFixed(3)} g', style: const pw.TextStyle(fontSize: 8)),
                 ],
-              ),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('Total Weight:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('${totalWeight.toStringAsFixed(3)} g', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                ],
-              ),
-              pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
-              pw.SizedBox(height: 4),
-              pw.Text('Thank You', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-            ],
-          );
+              );
+            }),
+            pw.Divider(thickness: 0.5),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Items:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                pw.Text('${items.length}', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Total Weight:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                pw.Text('${totalWeight.toStringAsFixed(3)} g', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
+            pw.Center(
+              child: pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Center(
+              child: pw.Text('Thank You', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+            ),
+          ];
         },
       ),
     );
@@ -219,8 +223,8 @@ class TSPLPrinter {
 
     final pageFormat = PdfPageFormat(
       58 * PdfPageFormat.mm,
-      double.infinity,
-      marginAll: 3 * PdfPageFormat.mm,
+      200 * PdfPageFormat.mm,
+      marginAll: 2 * PdfPageFormat.mm,
     );
 
     int grandTotalItems = 0;
@@ -240,73 +244,83 @@ class TSPLPrinter {
     }
 
     pdf.addPage(
-      pw.Page(
+      pw.MultiPage(
         pageFormat: pageFormat,
         build: (pw.Context context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              if (logoImage != null) ...[
-                pw.Center(
-                  child: pw.Image(logoImage, width: 100),
-                ),
-                pw.SizedBox(height: 4),
+          return [
+            if (logoImage != null)
+              pw.Center(
+                child: pw.Image(logoImage, width: 100),
+              ),
+            pw.SizedBox(height: 4),
+            pw.Center(
+              child: pw.Text('JEWEL POS', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+            ),
+            pw.Center(
+              child: pw.Text('END OF DAY REPORT', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+            ),
+            pw.Center(
+              child: pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
+            ),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Date:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                pw.Text(date, style: const pw.TextStyle(fontSize: 8)),
               ],
-              pw.Text('JEWEL POS', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
-              pw.Text('END OF DAY REPORT', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-              pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('Date:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                  pw.Text(date, style: const pw.TextStyle(fontSize: 8)),
-                ],
-              ),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('Total Receipts:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('${logs.length}', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                ],
-              ),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('Total Items Billed:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('$grandTotalItems', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                ],
-              ),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('Total Net Weight:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('${grandTotalWeight.toStringAsFixed(3)} g', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                ],
-              ),
-              pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
-              if (terminalStats.isNotEmpty) ...[
-                pw.Text('TERMINAL BREAKDOWN', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                pw.Divider(thickness: 0.5),
-                ...terminalStats.entries.map((e) {
-                  final tName = e.key;
-                  final tCount = e.value['count'];
-                  final tWt = (e.value['weight'] as double).toStringAsFixed(3);
-                  return pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Expanded(
-                        child: pw.Text('$tName ($tCount receipts)', style: const pw.TextStyle(fontSize: 7.5)),
-                      ),
-                      pw.Text('$tWt g', style: const pw.TextStyle(fontSize: 7.5)),
-                    ],
-                  );
-                }),
-                pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
+            ),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Total Receipts:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                pw.Text('${logs.length}', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
               ],
-              pw.SizedBox(height: 4),
-              pw.Text('Thank You', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+            ),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Total Items Billed:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                pw.Text('$grandTotalItems', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Total Net Weight:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                pw.Text('${grandTotalWeight.toStringAsFixed(3)} g', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
+            pw.Center(
+              child: pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
+            ),
+            if (terminalStats.isNotEmpty) ...[
+              pw.Center(
+                child: pw.Text('TERMINAL BREAKDOWN', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+              ),
+              pw.Divider(thickness: 0.5),
+              ...terminalStats.entries.map((e) {
+                final tName = e.key;
+                final tCount = e.value['count'];
+                final tWt = (e.value['weight'] as double).toStringAsFixed(3);
+                return pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Expanded(
+                      child: pw.Text('$tName ($tCount receipts)', style: const pw.TextStyle(fontSize: 7.5)),
+                    ),
+                    pw.Text('$tWt g', style: const pw.TextStyle(fontSize: 7.5)),
+                  ],
+                );
+              }),
+              pw.Center(
+                child: pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
+              ),
             ],
-          );
+            pw.SizedBox(height: 4),
+            pw.Center(
+              child: pw.Text('Thank You', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+            ),
+          ];
         },
       ),
     );
