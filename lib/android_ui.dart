@@ -1453,7 +1453,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                                 ),
                                 const Spacer(),
                                 Text(
-                                  '${item.weight.toStringAsFixed(4)} g',
+                                  '${item.weight.toStringAsFixed(3)} g',
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black),
                                 ),
                               ],
@@ -1480,7 +1480,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                     style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   Text(
-                    'Total Weight: ${_totalWeight.toStringAsFixed(4)} g',
+                    'Total Weight: ${_totalWeight.toStringAsFixed(3)} g',
                     style: const TextStyle(color: Colors.amber, fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ],

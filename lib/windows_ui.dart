@@ -598,7 +598,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
 
     final rawPurity = item.purity.replaceAll(RegExp(r'[^0-9]'), '');
     final purityNumCtrl = TextEditingController(text: rawPurity.isEmpty ? '22' : rawPurity);
-    final weightCtrl = TextEditingController(text: item.weight.toStringAsFixed(4));
+    final weightCtrl = TextEditingController(text: item.weight.toStringAsFixed(3));
     final editFormKey = GlobalKey<FormState>();
 
     showDialog(
@@ -1004,7 +1004,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                   ]),
                   TableRow(children: [
                     const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Weight:', style: TextStyle(fontWeight: FontWeight.bold))),
-                    Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text('${item.weight.toStringAsFixed(4)} g')),
+                    Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text('${item.weight.toStringAsFixed(3)} g')),
                   ]),
                 ],
               ),
@@ -1474,7 +1474,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                                           DataCell(Text(item.itemName)),
                                           DataCell(Text(item.category)),
                                           DataCell(Text(item.purity)),
-                                          DataCell(Text(item.weight.toStringAsFixed(4))),
+                                          DataCell(Text(item.weight.toStringAsFixed(3))),
                                           DataCell(
                                             Row(
                                               mainAxisSize: MainAxisSize.min,

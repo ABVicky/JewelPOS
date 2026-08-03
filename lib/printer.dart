@@ -42,7 +42,7 @@ class TSPLPrinter {
                 ),
                 // Row 2: Purity & Weight (Bold & Clear)
                 pw.Text(
-                  'Pur: ${item.purity}  Wt: ${item.weight.toStringAsFixed(4)} g',
+                  'Pur: ${item.purity}  Wt: ${item.weight.toStringAsFixed(3)} g',
                   style: pw.TextStyle(
                     fontSize: 8,
                     fontWeight: pw.FontWeight.bold,
