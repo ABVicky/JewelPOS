@@ -133,9 +133,13 @@ class TSPLPrinter {
       marginAll: 2 * PdfPageFormat.mm,
     );
 
+    int totalQty = 0;
     double totalWeight = 0.0;
     for (var item in items) {
-      totalWeight += (item['weight'] as num?)?.toDouble() ?? 0.0;
+      final qty = (item['quantity'] as num?)?.toInt() ?? (item['qty'] as num?)?.toInt() ?? 1;
+      final wt = (item['weight'] as num?)?.toDouble() ?? 0.0;
+      totalQty += qty;
+      totalWeight += (wt * qty);
     }
 
     pdf.addPage(
@@ -156,27 +160,57 @@ class TSPLPrinter {
             ),
             pw.SizedBox(height: 2),
             pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                pw.Text('Item Name', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                pw.Text('Weight', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                pw.Expanded(
+                  flex: 5,
+                  child: pw.Text('Item Name', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold)),
+                ),
+                pw.SizedBox(
+                  width: 25,
+                  child: pw.Text('Qty', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center),
+                ),
+                pw.SizedBox(
+                  width: 32,
+                  child: pw.Text('Carat', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center),
+                ),
+                pw.SizedBox(
+                  width: 48,
+                  child: pw.Text('Weight', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.right),
+                ),
               ],
             ),
             pw.Divider(thickness: 0.5),
             ...items.map((item) {
-              final name = (item['itemName'] ?? '').toString();
+              final name = (item['itemName'] ?? item['item_name'] ?? '').toString();
+              final qty = (item['quantity'] as num?)?.toInt() ?? (item['qty'] as num?)?.toInt() ?? 1;
+              final purity = (item['purity'] ?? item['carat'] ?? '').toString();
               final wt = (item['weight'] as num?)?.toDouble() ?? 0.0;
-              return pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Expanded(
-                    child: pw.Text(
-                      name.length > 18 ? name.substring(0, 18) : name,
-                      style: const pw.TextStyle(fontSize: 8),
+              final itemTotWt = wt * qty;
+              return pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(vertical: 1),
+                child: pw.Row(
+                  children: [
+                    pw.Expanded(
+                      flex: 5,
+                      child: pw.Text(
+                        name.length > 12 ? name.substring(0, 12) : name,
+                        style: const pw.TextStyle(fontSize: 7),
+                      ),
                     ),
-                  ),
-                  pw.Text('${wt.toStringAsFixed(3)} g', style: const pw.TextStyle(fontSize: 8)),
-                ],
+                    pw.SizedBox(
+                      width: 25,
+                      child: pw.Text('$qty', style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.center),
+                    ),
+                    pw.SizedBox(
+                      width: 32,
+                      child: pw.Text(purity.isEmpty ? '-' : purity, style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.center),
+                    ),
+                    pw.SizedBox(
+                      width: 48,
+                      child: pw.Text('${itemTotWt.toStringAsFixed(3)}g', style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.right),
+                    ),
+                  ],
+                ),
               );
             }),
             pw.Divider(thickness: 0.5),
@@ -184,7 +218,7 @@ class TSPLPrinter {
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
                 pw.Text('Items:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                pw.Text('${items.length}', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                pw.Text('$totalQty', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
               ],
             ),
             pw.Row(

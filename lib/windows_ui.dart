@@ -35,6 +35,8 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
 
   // Search & Items State
   final _searchController = TextEditingController();
+  final _rangeFromController = TextEditingController();
+  final _rangeToController = TextEditingController();
   List<InventoryItem> _allItems = [];
   List<InventoryItem> _filteredItems = [];
   Set<String> _selectedBarcodes = {};
@@ -65,6 +67,18 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     super.initState();
     _loadSettings();
     _refreshData();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _customCategoryController.dispose();
+    _purityNumberController.dispose();
+    _weightController.dispose();
+    _searchController.dispose();
+    _rangeFromController.dispose();
+    _rangeToController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSettings() async {
@@ -112,15 +126,45 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     }
   }
 
+  int? _getBarcodeNumericValue(String barcode) {
+    final numStr = barcode.replaceAll(RegExp(r'[^0-9]'), '');
+    if (numStr.isEmpty) return null;
+    return int.tryParse(numStr);
+  }
+
   void _applySearch() {
-    final query = _searchController.text.trim().toLowerCase();
-    if (query.isEmpty) {
+    final rawQuery = _searchController.text.trim();
+    final query = rawQuery.toLowerCase();
+
+    int? fromRange = int.tryParse(_rangeFromController.text.trim());
+    int? toRange = int.tryParse(_rangeToController.text.trim());
+
+    // Auto-detect hyphenated range pattern in search query e.g. "400-600"
+    final rangeMatch = RegExp(r'^(?:[A-Za-z]*)(\d+)\s*-\s*(?:[A-Za-z]*)(\d+)$').firstMatch(rawQuery);
+    if (rangeMatch != null) {
+      fromRange = int.tryParse(rangeMatch.group(1)!);
+      toRange = int.tryParse(rangeMatch.group(2)!);
+    }
+
+    if (query.isEmpty && fromRange == null && toRange == null) {
       _filteredItems = List.from(_allItems);
     } else {
       _filteredItems = _allItems.where((item) {
+        // Apply numeric barcode range filter if set
+        if (fromRange != null || toRange != null) {
+          final numVal = _getBarcodeNumericValue(item.barcode);
+          if (numVal == null) return false;
+          if (fromRange != null && numVal < fromRange) return false;
+          if (toRange != null && numVal > toRange) return false;
+        }
+
+        if (rangeMatch != null) return true;
+        if (query.isEmpty) return true;
+
         return item.barcode.toLowerCase().contains(query) ||
             item.itemName.toLowerCase().contains(query) ||
-            item.category.toLowerCase().contains(query);
+            item.category.toLowerCase().contains(query) ||
+            item.purity.toLowerCase().contains(query);
       }).toList();
     }
   }
@@ -272,6 +316,55 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
           backgroundColor: Colors.green.shade800,
         ),
       );
+    }
+  }
+
+  Future<void> _deleteSelectedItems() async {
+    if (_selectedBarcodes.isEmpty) return;
+
+    final count = _selectedBarcodes.length;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+        title: Text('Delete $count Selected Item(s)?', style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: Text('Are you sure you want to permanently delete $count selected item(s) from the inventory database? This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.black)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade800,
+              foregroundColor: Colors.white,
+              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete Permanently', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        final deleted = await InventoryDB.deleteItemsByBarcodes(_selectedBarcodes.toList());
+        setState(() {
+          _selectedBarcodes.clear();
+        });
+        await _refreshData();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Successfully deleted $deleted item(s) from database.'),
+              backgroundColor: Colors.green.shade800,
+            ),
+          );
+        }
+      } catch (e) {
+        _showErrorDialog('Delete Error', 'Failed to delete selected items: $e');
+      }
     }
   }
 
@@ -532,18 +625,31 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     );
   }
 
-  Future<void> _backupDatabase() async {
+  Future<void> _exportDatabaseToExcel() async {
     try {
-      final destPath = await InventoryDB.backupDatabase();
+      final filePath = await InventoryDB.exportDatabaseToExcel();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Database backed up successfully to $destPath'),
-          backgroundColor: Colors.green.shade800,
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+          title: const Text('Export Successful', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: SelectableText('The inventory database has been successfully exported to Excel format:\n\n$filePath'),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0F172A),
+                foregroundColor: Colors.white,
+                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+              ),
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('OK', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
         ),
       );
     } catch (e) {
-      _showErrorDialog('Backup Failed', 'Could not backup database: $e');
+      _showErrorDialog('Export Failed', 'Could not export database to Excel: $e');
     }
   }
 
@@ -1101,9 +1207,9 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
               ),
               const SizedBox(width: 4),
               TextButton.icon(
-                onPressed: _backupDatabase,
-                icon: const Icon(Icons.backup, color: Colors.white, size: 16),
-                label: const Text('Backup DB', style: TextStyle(color: Colors.white, fontSize: 13)),
+                onPressed: _exportDatabaseToExcel,
+                icon: const Icon(Icons.file_download, color: Colors.white, size: 16),
+                label: const Text('Export Excel', style: TextStyle(color: Colors.white, fontSize: 13)),
               ),
               const SizedBox(width: 4),
               TextButton.icon(
@@ -1347,7 +1453,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                         ),
                       ),
                       const Spacer(),
-                      if (_selectedBarcodes.isNotEmpty)
+                      if (_selectedBarcodes.isNotEmpty) ...[
                         ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF0F172A),
@@ -1357,8 +1463,21 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                           ),
                           onPressed: _printSelectedLabels,
                           icon: const Icon(Icons.print, size: 16),
-                          label: Text('Print Selected Labels (${_selectedBarcodes.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          label: Text('Print Selected (${_selectedBarcodes.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
                         ),
+                        const SizedBox(width: 8),
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red.shade800,
+                            foregroundColor: Colors.white,
+                            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          ),
+                          onPressed: _deleteSelectedItems,
+                          icon: const Icon(Icons.delete_forever, size: 16),
+                          label: Text('Delete Selected (${_selectedBarcodes.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                      ],
                       const SizedBox(width: 12),
                       Text(
                         'Total Items: ${_filteredItems.length}',
@@ -1368,25 +1487,63 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Search Bar
-                  TextField(
-                    controller: _searchController,
-                    onChanged: (_) => setState(() => _applySearch()),
-                    decoration: InputDecoration(
-                      hintText: 'Search by Barcode, Item Name, or Category...',
-                      prefixIcon: const Icon(Icons.search),
-                      suffixIcon: _searchController.text.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.clear),
-                              onPressed: () {
-                                _searchController.clear();
-                                setState(() => _applySearch());
-                              },
-                            )
-                          : null,
-                      border: const OutlineInputBorder(),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                    ),
+                  // Search Bar & Barcode Range Filter Row
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _searchController,
+                          onChanged: (_) => setState(() => _applySearch()),
+                          decoration: InputDecoration(
+                            hintText: 'Search by Name, Category, or Barcode Range (e.g. 400-600)...',
+                            prefixIcon: const Icon(Icons.search),
+                            suffixIcon: (_searchController.text.isNotEmpty || _rangeFromController.text.isNotEmpty || _rangeToController.text.isNotEmpty)
+                                ? IconButton(
+                                    icon: const Icon(Icons.clear),
+                                    onPressed: () {
+                                      _searchController.clear();
+                                      _rangeFromController.clear();
+                                      _rangeToController.clear();
+                                      setState(() => _applySearch());
+                                    },
+                                  )
+                                : null,
+                            border: const OutlineInputBorder(),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 120,
+                        child: TextField(
+                          controller: _rangeFromController,
+                          keyboardType: TextInputType.number,
+                          onChanged: (_) => setState(() => _applySearch()),
+                          decoration: const InputDecoration(
+                            labelText: 'From Barcode #',
+                            hintText: '400',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 120,
+                        child: TextField(
+                          controller: _rangeToController,
+                          keyboardType: TextInputType.number,
+                          onChanged: (_) => setState(() => _applySearch()),
+                          decoration: const InputDecoration(
+                            labelText: 'To Barcode #',
+                            hintText: '600',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 16),
 

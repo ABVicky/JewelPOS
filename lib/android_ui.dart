@@ -24,6 +24,7 @@ class ScannedPosItem {
   final String category;
   final String purity;
   final double weight;
+  int quantity;
 
   ScannedPosItem({
     required this.barcode,
@@ -31,16 +32,29 @@ class ScannedPosItem {
     required this.category,
     required this.purity,
     required this.weight,
+    this.quantity = 1,
   });
 
   factory ScannedPosItem.fromJson(Map<String, dynamic> json) {
     return ScannedPosItem(
       barcode: json['barcode'] as String? ?? '',
-      itemName: json['item_name'] as String? ?? json['name'] as String? ?? 'Unknown',
+      itemName: json['item_name'] as String? ?? json['itemName'] as String? ?? json['name'] as String? ?? 'Unknown',
       category: json['category'] as String? ?? '',
       purity: json['purity'] as String? ?? '',
       weight: (json['weight'] as num?)?.toDouble() ?? 0.0,
+      quantity: (json['quantity'] as num?)?.toInt() ?? (json['qty'] as num?)?.toInt() ?? 1,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'barcode': barcode,
+      'itemName': itemName,
+      'category': category,
+      'purity': purity,
+      'weight': weight,
+      'quantity': quantity,
+    };
   }
 }
 
@@ -518,21 +532,33 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
 
     // Header Table Columns (32 columns max for 58mm paper roll)
     bytes.addAll([0x1B, 0x61, 0x00]); // Left align
-    bytes.addAll(utf8.encode("Item Name               Weight  \n"));
+    bytes.addAll(utf8.encode("Item Name      Qty Carat Weight \n"));
     bytes.addAll(utf8.encode("--------------------------------\n"));
 
+    int totalQty = 0;
     double totalWeight = 0.0;
+
     for (var item in itemsToPrint) {
-      totalWeight += item.weight;
-      final nameStr = item.itemName.length > 20
-          ? item.itemName.substring(0, 20)
-          : item.itemName.padRight(20);
-      final wtStr = "${item.weight.toStringAsFixed(3)} g".padLeft(12);
-      bytes.addAll(utf8.encode("$nameStr$wtStr\n"));
+      final qty = item.quantity;
+      final itemTotWt = item.weight * qty;
+      totalQty += qty;
+      totalWeight += itemTotWt;
+
+      final nameStr = item.itemName.length > 12
+          ? item.itemName.substring(0, 12)
+          : item.itemName.padRight(12);
+      final qtyStr = qty.toString().padLeft(3);
+      final purityRaw = item.purity.isEmpty ? "-" : item.purity;
+      final caratStr = purityRaw.length > 5
+          ? purityRaw.substring(0, 5).padLeft(5)
+          : purityRaw.padLeft(5);
+      final wtStr = "${itemTotWt.toStringAsFixed(3)}g".padLeft(8);
+
+      bytes.addAll(utf8.encode("$nameStr $qtyStr $caratStr $wtStr\n"));
     }
 
     bytes.addAll(utf8.encode("--------------------------------\n"));
-    final countStr = itemsToPrint.length.toString();
+    final countStr = totalQty.toString();
     final totWtStr = "${totalWeight.toStringAsFixed(3)} g";
 
     final countPad = ' ' * (32 - "Items".length - countStr.length);
@@ -594,19 +620,30 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     final StringBuffer sb = StringBuffer();
     sb.writeln("JEWEL POS");
     sb.writeln("================================");
-    sb.writeln("Item Name               Weight  ");
+    sb.writeln("Item Name      Qty Carat Weight ");
     sb.writeln("--------------------------------");
+    int totalQty = 0;
     double totalWeight = 0.0;
     for (var item in itemsToPrint) {
-      totalWeight += item.weight;
-      final nameStr = item.itemName.length > 20
-          ? item.itemName.substring(0, 20)
-          : item.itemName.padRight(20);
-      final wtStr = "${item.weight.toStringAsFixed(3)} g".padLeft(12);
-      sb.writeln("$nameStr$wtStr");
+      final qty = item.quantity;
+      final itemTotWt = item.weight * qty;
+      totalQty += qty;
+      totalWeight += itemTotWt;
+
+      final nameStr = item.itemName.length > 12
+          ? item.itemName.substring(0, 12)
+          : item.itemName.padRight(12);
+      final qtyStr = qty.toString().padLeft(3);
+      final purityRaw = item.purity.isEmpty ? "-" : item.purity;
+      final caratStr = purityRaw.length > 5
+          ? purityRaw.substring(0, 5).padLeft(5)
+          : purityRaw.padLeft(5);
+      final wtStr = "${itemTotWt.toStringAsFixed(3)}g".padLeft(8);
+
+      sb.writeln("$nameStr $qtyStr $caratStr $wtStr");
     }
     sb.writeln("--------------------------------");
-    final countStr = itemsToPrint.length.toString();
+    final countStr = totalQty.toString();
     final totWtStr = "${totalWeight.toStringAsFixed(3)} g";
 
     final countPad = ' ' * (32 - "Items".length - countStr.length);
@@ -635,16 +672,18 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     try {
       final now = DateTime.now();
       final dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+      int totalQty = 0;
       double totalWeight = 0.0;
       for (var item in itemsToPrint) {
-        totalWeight += item.weight;
+        totalQty += item.quantity;
+        totalWeight += (item.weight * item.quantity);
       }
 
       final log = PrintLog(
         terminalName: _terminalName.isNotEmpty ? _terminalName : 'POS Terminal',
         date: dateStr,
         timestamp: now.toIso8601String(),
-        totalItems: itemsToPrint.length,
+        totalItems: totalQty,
         totalWeight: totalWeight,
         itemsJson: jsonEncode(itemsToPrint.map((i) => {
           'barcode': i.barcode,
@@ -652,6 +691,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
           'category': i.category,
           'purity': i.purity,
           'weight': i.weight,
+          'quantity': i.quantity,
         }).toList()),
       );
 
@@ -1161,7 +1201,144 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
   }
 
   // Calculate Totals
-  double get _totalWeight => _scannedItems.fold(0.0, (sum, item) => sum + item.weight);
+  int get _totalQuantity => _scannedItems.fold(0, (sum, item) => sum + item.quantity);
+  double get _totalWeight => _scannedItems.fold(0.0, (sum, item) => sum + (item.weight * item.quantity));
+
+  void _showQuantityDialog(int index, ScannedPosItem item) {
+    int tempQty = item.quantity;
+    final textController = TextEditingController(text: '$tempQty');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return AlertDialog(
+            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            title: Text('Quantity for ${item.itemName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Enter or scroll to select quantity:', style: TextStyle(fontSize: 13, color: Colors.black87)),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle_outline, size: 30, color: Color(0xFF0F172A)),
+                        onPressed: () {
+                          if (tempQty > 1) {
+                            setModalState(() {
+                              tempQty--;
+                              textController.text = '$tempQty';
+                            });
+                          }
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 80,
+                        child: TextField(
+                          controller: textController,
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(vertical: 8),
+                          ),
+                          onChanged: (val) {
+                            final parsed = int.tryParse(val);
+                            if (parsed != null && parsed > 0) {
+                              setModalState(() {
+                                tempQty = parsed;
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.add_circle_outline, size: 30, color: Color(0xFF0F172A)),
+                        onPressed: () {
+                          setModalState(() {
+                            tempQty++;
+                            textController.text = '$tempQty';
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Scroll Wheel Selection:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  const SizedBox(height: 8),
+                  Container(
+                    height: 120,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: ListWheelScrollView.useDelegate(
+                      itemExtent: 36,
+                      diameterRatio: 1.2,
+                      perspective: 0.003,
+                      physics: const FixedExtentScrollPhysics(),
+                      onSelectedItemChanged: (idx) {
+                        setModalState(() {
+                          tempQty = idx + 1;
+                          textController.text = '$tempQty';
+                        });
+                      },
+                      childDelegate: ListWheelChildBuilderDelegate(
+                        builder: (context, idx) {
+                          final val = idx + 1;
+                          final isSelected = val == tempQty;
+                          return Center(
+                            child: Text(
+                              '$val',
+                              style: TextStyle(
+                                fontSize: isSelected ? 20 : 15,
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                color: isSelected ? const Color(0xFF0F172A) : Colors.grey.shade600,
+                              ),
+                            ),
+                          );
+                        },
+                        childCount: 99,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel', style: TextStyle(color: Colors.black)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0F172A),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () {
+                  final finalQty = int.tryParse(textController.text) ?? tempQty;
+                  if (finalQty > 0) {
+                    setState(() {
+                      _scannedItems[index].quantity = finalQty;
+                    });
+                  }
+                  Navigator.of(ctx).pop();
+                },
+                child: const Text('Save Quantity', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
 
   void _showAboutDialog() {
     showDialog(
@@ -1458,20 +1635,82 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                             ),
                             title: Row(
                               children: [
-                                Text(
-                                  item.itemName,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                Expanded(
+                                  child: Text(
+                                    item.itemName,
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
-                                const Spacer(),
+                                const SizedBox(width: 8),
                                 Text(
-                                  '${item.weight.toStringAsFixed(3)} g',
+                                  '${(item.weight * item.quantity).toStringAsFixed(3)} g',
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black),
                                 ),
                               ],
                             ),
-                            subtitle: Text(
-                              'Barcode: ${item.barcode}  |  Category: ${item.category}  |  Purity: ${item.purity}',
-                              style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                            subtitle: Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      'Barcode: ${item.barcode} | Carat: ${item.purity}',
+                                      style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  // Interactive Quantity Control
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey.shade200,
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(color: Colors.grey.shade400, width: 0.8),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        InkWell(
+                                          onTap: () {
+                                            if (item.quantity > 1) {
+                                              setState(() {
+                                                item.quantity--;
+                                              });
+                                            }
+                                          },
+                                          child: const Padding(
+                                            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            child: Icon(Icons.remove, size: 14, color: Colors.black87),
+                                          ),
+                                        ),
+                                        GestureDetector(
+                                          onTap: () => _showQuantityDialog(index, item),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                            color: Colors.white,
+                                            child: Text(
+                                              'Qty: ${item.quantity}',
+                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF0F172A)),
+                                            ),
+                                          ),
+                                        ),
+                                        InkWell(
+                                          onTap: () {
+                                            setState(() {
+                                              item.quantity++;
+                                            });
+                                          },
+                                          child: const Padding(
+                                            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            child: Icon(Icons.add, size: 14, color: Colors.black87),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         );
@@ -1487,7 +1726,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Total Items: ${_scannedItems.length}',
+                    'Total Items: $_totalQuantity',
                     style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   Text(

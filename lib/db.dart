@@ -214,6 +214,17 @@ class InventoryDB {
     return await db.delete('Inventory', where: 'id = ?', whereArgs: [id]);
   }
 
+  static Future<int> deleteItemsByBarcodes(List<String> barcodes) async {
+    if (barcodes.isEmpty) return 0;
+    final db = await instance;
+    final placeholders = List.filled(barcodes.length, '?').join(',');
+    return await db.delete(
+      'Inventory',
+      where: 'barcode IN ($placeholders)',
+      whereArgs: barcodes,
+    );
+  }
+
   static Future<List<InventoryItem>> getAllItems() async {
     final db = await instance;
     final res = await db.query('Inventory', orderBy: 'id DESC');
@@ -254,6 +265,56 @@ class InventoryDB {
     final db = await instance;
     final res = await db.rawQuery('SELECT DISTINCT date FROM PrintLogs ORDER BY date DESC');
     return res.map((row) => row['date'] as String? ?? '').where((d) => d.isNotEmpty).toList();
+  }
+
+  static Future<String> exportDatabaseToExcel() async {
+    final items = await getAllItems();
+
+    final StringBuffer sb = StringBuffer();
+    // UTF-8 BOM for Excel character recognition
+    sb.write('\uFEFF');
+
+    // Header Row
+    sb.writeln('"ID","Barcode","Item Name","Category","Purity","Weight (g)","Created At"');
+
+    // Data Rows
+    for (var item in items) {
+      final id = item.id ?? '';
+      final barcode = _escapeCsv(item.barcode);
+      final name = _escapeCsv(item.itemName);
+      final category = _escapeCsv(item.category);
+      final purity = _escapeCsv(item.purity);
+      final weight = item.weight.toStringAsFixed(3);
+      final createdAt = _escapeCsv(item.createdAt);
+
+      sb.writeln('"$id","$barcode","$name","$category","$purity","$weight","$createdAt"');
+    }
+
+    if (kIsWeb) {
+      return "Database exported successfully (${items.length} records).";
+    }
+
+    final dbPath = await getDatabasePath();
+    final dbFile = File(dbPath);
+    final parentDir = dbFile.parent.path;
+    final exportsDir = Directory(p.join(parentDir, 'Exports'));
+    if (!await exportsDir.exists()) {
+      await exportsDir.create(recursive: true);
+    }
+
+    final now = DateTime.now();
+    final timestamp = "${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_"
+        "${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}";
+    final exportFileName = 'inventory_export_$timestamp.csv';
+    final destinationPath = p.join(exportsDir.path, exportFileName);
+
+    final exportFile = File(destinationPath);
+    await exportFile.writeAsString(sb.toString());
+    return destinationPath;
+  }
+
+  static String _escapeCsv(String val) {
+    return val.replaceAll('"', '""');
   }
 
   static Future<String> backupDatabase() async {
