@@ -132,6 +132,12 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     return int.tryParse(numStr);
   }
 
+  int _getSerialNumber(InventoryItem item) {
+    final numVal = _getBarcodeNumericValue(item.barcode);
+    if (numVal != null) return numVal;
+    return item.id ?? 0;
+  }
+
   void _applySearch() {
     final rawQuery = _searchController.text.trim();
     final query = rawQuery.toLowerCase();
@@ -150,12 +156,12 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
       _filteredItems = List.from(_allItems);
     } else {
       _filteredItems = _allItems.where((item) {
-        // Apply numeric barcode range filter if set
+        final slNo = _getSerialNumber(item);
+
+        // Apply numeric serial number range filter if set
         if (fromRange != null || toRange != null) {
-          final numVal = _getBarcodeNumericValue(item.barcode);
-          if (numVal == null) return false;
-          if (fromRange != null && numVal < fromRange) return false;
-          if (toRange != null && numVal > toRange) return false;
+          if (fromRange != null && slNo < fromRange) return false;
+          if (toRange != null && slNo > toRange) return false;
         }
 
         if (rangeMatch != null) return true;
@@ -164,9 +170,40 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
         return item.barcode.toLowerCase().contains(query) ||
             item.itemName.toLowerCase().contains(query) ||
             item.category.toLowerCase().contains(query) ||
-            item.purity.toLowerCase().contains(query);
+            item.purity.toLowerCase().contains(query) ||
+            slNo.toString() == query;
       }).toList();
     }
+  }
+
+  void _selectRange() {
+    final from = int.tryParse(_rangeFromController.text.trim());
+    final to = int.tryParse(_rangeToController.text.trim());
+    if (from == null && to == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a From or To Serial Number range.')),
+      );
+      return;
+    }
+
+    setState(() {
+      for (final item in _allItems) {
+        final slNo = _getSerialNumber(item);
+        bool match = true;
+        if (from != null && slNo < from) match = false;
+        if (to != null && slNo > to) match = false;
+        if (match) {
+          _selectedBarcodes.add(item.barcode);
+        }
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Selected all items in Serial No. range ${from ?? ''} - ${to ?? ''}.'),
+        backgroundColor: const Color(0xFF0F172A),
+      ),
+    );
   }
 
   void _clearForm() {
@@ -1193,41 +1230,50 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                   ],
                 ),
               ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: _showConnectedTerminalsDialog,
-                icon: const Icon(Icons.phonelink, color: Colors.white, size: 16),
-                label: Text('Terminals (${DesktopHttpServer.activeOnlineTerminalsCount})', style: const TextStyle(color: Colors.white, fontSize: 13)),
-              ),
-              const SizedBox(width: 4),
-              TextButton.icon(
-                onPressed: _showDailyReportDialog,
-                icon: const Icon(Icons.assessment, color: Colors.white, size: 16),
-                label: const Text('Daily Report', style: TextStyle(color: Colors.white, fontSize: 13)),
-              ),
-              const SizedBox(width: 4),
-              TextButton.icon(
-                onPressed: _exportDatabaseToExcel,
-                icon: const Icon(Icons.file_download, color: Colors.white, size: 16),
-                label: const Text('Export Excel', style: TextStyle(color: Colors.white, fontSize: 13)),
-              ),
-              const SizedBox(width: 4),
-              TextButton.icon(
-                onPressed: _restoreDatabase,
-                icon: const Icon(Icons.restore, color: Colors.white, size: 16),
-                label: const Text('Restore DB', style: TextStyle(color: Colors.white, fontSize: 13)),
-              ),
-              const SizedBox(width: 4),
-              TextButton.icon(
-                onPressed: _showSettingsDialog,
-                icon: const Icon(Icons.settings, color: Colors.white, size: 16),
-                label: const Text('Settings', style: TextStyle(color: Colors.white, fontSize: 13)),
-              ),
-              const SizedBox(width: 4),
-              TextButton.icon(
-                onPressed: _showAboutDialog,
-                icon: const Icon(Icons.info_outline, color: Colors.white, size: 16),
-                label: const Text('About', style: TextStyle(color: Colors.white, fontSize: 13)),
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton.icon(
+                        onPressed: _showConnectedTerminalsDialog,
+                        icon: const Icon(Icons.phonelink, color: Colors.white, size: 16),
+                        label: Text('Terminals (${DesktopHttpServer.activeOnlineTerminalsCount})', style: const TextStyle(color: Colors.white, fontSize: 13)),
+                      ),
+                      const SizedBox(width: 4),
+                      TextButton.icon(
+                        onPressed: _showDailyReportDialog,
+                        icon: const Icon(Icons.assessment, color: Colors.white, size: 16),
+                        label: const Text('Daily Report', style: TextStyle(color: Colors.white, fontSize: 13)),
+                      ),
+                      const SizedBox(width: 4),
+                      TextButton.icon(
+                        onPressed: _exportDatabaseToExcel,
+                        icon: const Icon(Icons.file_download, color: Colors.white, size: 16),
+                        label: const Text('Export Excel', style: TextStyle(color: Colors.white, fontSize: 13)),
+                      ),
+                      const SizedBox(width: 4),
+                      TextButton.icon(
+                        onPressed: _restoreDatabase,
+                        icon: const Icon(Icons.restore, color: Colors.white, size: 16),
+                        label: const Text('Restore DB', style: TextStyle(color: Colors.white, fontSize: 13)),
+                      ),
+                      const SizedBox(width: 4),
+                      TextButton.icon(
+                        onPressed: _showSettingsDialog,
+                        icon: const Icon(Icons.settings, color: Colors.white, size: 16),
+                        label: const Text('Settings', style: TextStyle(color: Colors.white, fontSize: 13)),
+                      ),
+                      const SizedBox(width: 4),
+                      TextButton.icon(
+                        onPressed: _showAboutDialog,
+                        icon: const Icon(Icons.info_outline, color: Colors.white, size: 16),
+                        label: const Text('About', style: TextStyle(color: Colors.white, fontSize: 13)),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
@@ -1487,7 +1533,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Search Bar & Barcode Range Filter Row
+                  // Search Bar & Serial Number Range Filter Row
                   Row(
                     children: [
                       Expanded(
@@ -1495,7 +1541,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                           controller: _searchController,
                           onChanged: (_) => setState(() => _applySearch()),
                           decoration: InputDecoration(
-                            hintText: 'Search by Name, Category, or Barcode Range (e.g. 400-600)...',
+                            hintText: 'Search by Name, Category, Barcode, or Serial No. Range (e.g. 400-600)...',
                             prefixIcon: const Icon(Icons.search),
                             suffixIcon: (_searchController.text.isNotEmpty || _rangeFromController.text.isNotEmpty || _rangeToController.text.isNotEmpty)
                                 ? IconButton(
@@ -1521,7 +1567,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                           keyboardType: TextInputType.number,
                           onChanged: (_) => setState(() => _applySearch()),
                           decoration: const InputDecoration(
-                            labelText: 'From Barcode #',
+                            labelText: 'From Sl. No.',
                             hintText: '400',
                             border: OutlineInputBorder(),
                             contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
@@ -1536,12 +1582,24 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                           keyboardType: TextInputType.number,
                           onChanged: (_) => setState(() => _applySearch()),
                           decoration: const InputDecoration(
-                            labelText: 'To Barcode #',
+                            labelText: 'To Sl. No.',
                             hintText: '600',
                             border: OutlineInputBorder(),
                             contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                           ),
                         ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1E293B),
+                          foregroundColor: Colors.white,
+                          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                        ),
+                        onPressed: _selectRange,
+                        icon: const Icon(Icons.select_all, size: 16),
+                        label: const Text('Select Range', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                       ),
                     ],
                   ),
@@ -1563,6 +1621,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                                 child: SizedBox(
                                   width: double.infinity,
                                   child: DataTable(
+                                    showCheckboxColumn: false,
                                     headingRowColor: WidgetStateProperty.all(const Color(0xFFF1F5F9)),
                                     dataRowMinHeight: 48,
                                     dataRowMaxHeight: 48,
@@ -1581,6 +1640,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                                           },
                                         ),
                                       ),
+                                      const DataColumn(label: Text('Sl. No.', style: TextStyle(fontWeight: FontWeight.bold))),
                                       const DataColumn(label: Text('Barcode', style: TextStyle(fontWeight: FontWeight.bold))),
                                       const DataColumn(label: Text('Item Name', style: TextStyle(fontWeight: FontWeight.bold))),
                                       const DataColumn(label: Text('Category', style: TextStyle(fontWeight: FontWeight.bold))),
@@ -1590,6 +1650,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                                     ],
                                     rows: _filteredItems.map((item) {
                                       final isSelected = _selectedBarcodes.contains(item.barcode);
+                                      final slNo = _getSerialNumber(item);
                                       return DataRow(
                                         selected: isSelected,
                                         onSelectChanged: (selected) {
@@ -1614,6 +1675,12 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                                                   }
                                                 });
                                               },
+                                            ),
+                                          ),
+                                          DataCell(
+                                            Text(
+                                              '$slNo',
+                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                                             ),
                                           ),
                                           DataCell(
