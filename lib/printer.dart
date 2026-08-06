@@ -177,10 +177,10 @@ class TSPLPrinter {
             pw.SizedBox(height: 2),
             pw.Table(
               columnWidths: const {
-                0: pw.FlexColumnWidth(5.0),
-                1: pw.FlexColumnWidth(2.0),
-                2: pw.FlexColumnWidth(3.0),
-                3: pw.FlexColumnWidth(4.0),
+                0: pw.FlexColumnWidth(4.5),
+                1: pw.FlexColumnWidth(1.5),
+                2: pw.FlexColumnWidth(2.0),
+                3: pw.FlexColumnWidth(3.0),
               },
               children: [
                 pw.TableRow(
@@ -194,11 +194,11 @@ class TSPLPrinter {
                     ),
                     pw.Padding(
                       padding: const pw.EdgeInsets.symmetric(vertical: 2),
-                      child: pw.Text('Qty', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center),
+                      child: pw.Text('Qty', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.right),
                     ),
                     pw.Padding(
                       padding: const pw.EdgeInsets.symmetric(vertical: 2),
-                      child: pw.Text('Carat', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center),
+                      child: pw.Text('Carat', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.right),
                     ),
                     pw.Padding(
                       padding: const pw.EdgeInsets.symmetric(vertical: 2),
@@ -225,11 +225,11 @@ class TSPLPrinter {
                       ),
                       pw.Padding(
                         padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
-                        child: pw.Text('$qty', style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.center),
+                        child: pw.Text('$qty', style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.right),
                       ),
                       pw.Padding(
                         padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
-                        child: pw.Text(purity.isEmpty ? '-' : purity, style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.center),
+                        child: pw.Text(purity.isEmpty ? '-' : purity, style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.right),
                       ),
                       pw.Padding(
                         padding: const pw.EdgeInsets.symmetric(vertical: 1.5),

@@ -532,7 +532,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
 
     // Header Table Columns (32 columns max for 58mm paper roll)
     bytes.addAll([0x1B, 0x61, 0x00]); // Left align
-    bytes.addAll(utf8.encode("Item Name    Qty  Carat   Weight\n"));
+    bytes.addAll(utf8.encode("Item Name   Qty  Carat   Weight\n"));
     bytes.addAll(utf8.encode("--------------------------------\n"));
 
     int totalQty = 0;
@@ -556,17 +556,17 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       }
       weightByCarat[caratKey] = (weightByCarat[caratKey] ?? 0.0) + itemTotWt;
 
-      final nameStr = item.itemName.length > 12
-          ? item.itemName.substring(0, 12)
-          : item.itemName.padRight(12);
+      final nameStr = item.itemName.length > 11
+          ? item.itemName.substring(0, 11)
+          : item.itemName.padRight(11);
       final qtyStr = qty.toString().padLeft(3);
       final purityRaw = item.purity.isEmpty ? "-" : item.purity;
-      final caratStr = purityRaw.length > 6
-          ? purityRaw.substring(0, 6).padLeft(6)
-          : purityRaw.padLeft(6);
+      final caratStr = purityRaw.length > 5
+          ? purityRaw.substring(0, 5).padLeft(5)
+          : purityRaw.padLeft(5);
       final wtStr = "${itemTotWt.toStringAsFixed(3)}g".padLeft(8);
 
-      bytes.addAll(utf8.encode("$nameStr $qtyStr $caratStr $wtStr\n"));
+      bytes.addAll(utf8.encode("$nameStr $qtyStr  $caratStr  $wtStr\n"));
     }
 
     bytes.addAll(utf8.encode("--------------------------------\n"));
@@ -639,7 +639,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     final StringBuffer sb = StringBuffer();
     sb.writeln("JEWEL POS");
     sb.writeln("================================");
-    sb.writeln("Item Name    Qty  Carat   Weight");
+    sb.writeln("Item Name   Qty  Carat   Weight");
     sb.writeln("--------------------------------");
     int totalQty = 0;
     double totalWeight = 0.0;
@@ -662,17 +662,17 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       }
       weightByCarat[caratKey] = (weightByCarat[caratKey] ?? 0.0) + itemTotWt;
 
-      final nameStr = item.itemName.length > 12
-          ? item.itemName.substring(0, 12)
-          : item.itemName.padRight(12);
+      final nameStr = item.itemName.length > 11
+          ? item.itemName.substring(0, 11)
+          : item.itemName.padRight(11);
       final qtyStr = qty.toString().padLeft(3);
       final purityRaw = item.purity.isEmpty ? "-" : item.purity;
-      final caratStr = purityRaw.length > 6
-          ? purityRaw.substring(0, 6).padLeft(6)
-          : purityRaw.padLeft(6);
+      final caratStr = purityRaw.length > 5
+          ? purityRaw.substring(0, 5).padLeft(5)
+          : purityRaw.padLeft(5);
       final wtStr = "${itemTotWt.toStringAsFixed(3)}g".padLeft(8);
 
-      sb.writeln("$nameStr $qtyStr $caratStr $wtStr");
+      sb.writeln("$nameStr $qtyStr  $caratStr  $wtStr");
     }
     sb.writeln("--------------------------------");
     final countStr = totalQty.toString();
