@@ -138,6 +138,7 @@ class TSPLPrinter {
     int totalQty = 0;
     double totalWeight = 0.0;
     final Map<String, double> weightByCarat = {};
+    final Map<String, double> weightByItemCatCarat = {};
 
     for (var item in items) {
       final qty = (item['quantity'] as num?)?.toInt() ?? (item['qty'] as num?)?.toInt() ?? 1;
@@ -156,6 +157,13 @@ class TSPLPrinter {
         caratKey = rawPurity.toUpperCase();
       }
       weightByCarat[caratKey] = (weightByCarat[caratKey] ?? 0.0) + itemTotWt;
+
+      final rawName = (item['itemName'] ?? item['item_name'] ?? '').toString().trim();
+      final rawCat = (item['category'] ?? '').toString().trim();
+      final nameKey = rawName.isEmpty ? 'Item' : rawName;
+      final catKey = rawCat.isEmpty ? 'Others' : rawCat;
+      final itemCatCaratKey = "$nameKey - $catKey - $caratKey";
+      weightByItemCatCarat[itemCatCaratKey] = (weightByItemCatCarat[itemCatCaratKey] ?? 0.0) + itemTotWt;
     }
 
     pdf.addPage(
@@ -248,6 +256,28 @@ class TSPLPrinter {
                 pw.Text('$totalQty', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
               ],
             ),
+            pw.Divider(thickness: 0.5),
+            ...weightByItemCatCarat.entries.map((e) => pw.Padding(
+              padding: const pw.EdgeInsets.symmetric(vertical: 1),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Expanded(
+                    child: pw.Text(
+                      e.key,
+                      style: const pw.TextStyle(fontSize: 7),
+                    ),
+                  ),
+                  pw.SizedBox(width: 4),
+                  pw.Text(
+                    '${e.value.toStringAsFixed(3)} g',
+                    style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
+                  ),
+                ],
+              ),
+            )),
+            pw.Divider(thickness: 0.5),
             ...weightByCarat.entries.map((e) => pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [

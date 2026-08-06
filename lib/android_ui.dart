@@ -538,6 +538,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     int totalQty = 0;
     double totalWeight = 0.0;
     final Map<String, double> weightByCarat = {};
+    final Map<String, double> weightByItemCatCarat = {};
 
     for (var item in itemsToPrint) {
       final qty = item.quantity;
@@ -556,6 +557,11 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       }
       weightByCarat[caratKey] = (weightByCarat[caratKey] ?? 0.0) + itemTotWt;
 
+      final nameKey = item.itemName.trim().isEmpty ? 'Item' : item.itemName.trim();
+      final catKey = item.category.trim().isEmpty ? 'Others' : item.category.trim();
+      final itemCatCaratKey = "$nameKey - $catKey - $caratKey";
+      weightByItemCatCarat[itemCatCaratKey] = (weightByItemCatCarat[itemCatCaratKey] ?? 0.0) + itemTotWt;
+
       final nameStr = item.itemName.length > 11
           ? item.itemName.substring(0, 11)
           : item.itemName.padRight(11);
@@ -573,7 +579,27 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     final countStr = totalQty.toString();
     final countPad = ' ' * (32 - "Items".length - countStr.length);
     bytes.addAll(utf8.encode("Items$countPad$countStr\n"));
+    bytes.addAll(utf8.encode("--------------------------------\n"));
 
+    // Item - Category - Carat Separated Totals
+    for (var entry in weightByItemCatCarat.entries) {
+      final label = entry.key;
+      final valStr = "${entry.value.toStringAsFixed(3)} g";
+      if (label.length + valStr.length + 1 <= 32) {
+        final padLen = 32 - label.length - valStr.length;
+        final pad = ' ' * (padLen > 0 ? padLen : 1);
+        bytes.addAll(utf8.encode("$label$pad$valStr\n"));
+      } else {
+        bytes.addAll(utf8.encode("$label\n"));
+        final padLen = 32 - valStr.length;
+        final pad = ' ' * (padLen > 0 ? padLen : 1);
+        bytes.addAll(utf8.encode("$pad$valStr\n"));
+      }
+    }
+
+    bytes.addAll(utf8.encode("--------------------------------\n"));
+
+    // Carat-Wise Summary Totals
     for (var entry in weightByCarat.entries) {
       final label = "Total ${entry.key}";
       final valStr = "${entry.value.toStringAsFixed(3)} g";
@@ -644,6 +670,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     int totalQty = 0;
     double totalWeight = 0.0;
     final Map<String, double> weightByCarat = {};
+    final Map<String, double> weightByItemCatCarat = {};
 
     for (var item in itemsToPrint) {
       final qty = item.quantity;
@@ -662,6 +689,11 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       }
       weightByCarat[caratKey] = (weightByCarat[caratKey] ?? 0.0) + itemTotWt;
 
+      final nameKey = item.itemName.trim().isEmpty ? 'Item' : item.itemName.trim();
+      final catKey = item.category.trim().isEmpty ? 'Others' : item.category.trim();
+      final itemCatCaratKey = "$nameKey - $catKey - $caratKey";
+      weightByItemCatCarat[itemCatCaratKey] = (weightByItemCatCarat[itemCatCaratKey] ?? 0.0) + itemTotWt;
+
       final nameStr = item.itemName.length > 11
           ? item.itemName.substring(0, 11)
           : item.itemName.padRight(11);
@@ -678,6 +710,24 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     final countStr = totalQty.toString();
     final countPad = ' ' * (32 - "Items".length - countStr.length);
     sb.writeln("Items$countPad$countStr");
+    sb.writeln("--------------------------------");
+
+    for (var entry in weightByItemCatCarat.entries) {
+      final label = entry.key;
+      final valStr = "${entry.value.toStringAsFixed(3)} g";
+      if (label.length + valStr.length + 1 <= 32) {
+        final padLen = 32 - label.length - valStr.length;
+        final pad = ' ' * (padLen > 0 ? padLen : 1);
+        sb.writeln("$label$pad$valStr");
+      } else {
+        sb.writeln(label);
+        final padLen = 32 - valStr.length;
+        final pad = ' ' * (padLen > 0 ? padLen : 1);
+        sb.writeln("$pad$valStr");
+      }
+    }
+
+    sb.writeln("--------------------------------");
 
     for (var entry in weightByCarat.entries) {
       final label = "Total ${entry.key}";
