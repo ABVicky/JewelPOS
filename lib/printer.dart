@@ -137,7 +137,6 @@ class TSPLPrinter {
 
     int totalQty = 0;
     double totalWeight = 0.0;
-    final Map<String, double> weightByCarat = {};
     final Map<String, double> weightByCatCarat = {};
 
     for (var item in items) {
@@ -156,7 +155,6 @@ class TSPLPrinter {
       } else {
         caratKey = rawPurity.toUpperCase();
       }
-      weightByCarat[caratKey] = (weightByCarat[caratKey] ?? 0.0) + itemTotWt;
 
       final rawCat = (item['category'] ?? '').toString().trim();
       final catKey = rawCat.isEmpty ? 'Others' : rawCat;
@@ -274,14 +272,6 @@ class TSPLPrinter {
                   ),
                 ],
               ),
-            )),
-            pw.Divider(thickness: 0.5),
-            ...weightByCarat.entries.map((e) => pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text('Total ${e.key}:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                pw.Text('${e.value.toStringAsFixed(3)} g', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-              ],
             )),
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
