@@ -138,7 +138,7 @@ class TSPLPrinter {
     int totalQty = 0;
     double totalWeight = 0.0;
     final Map<String, double> weightByCarat = {};
-    final Map<String, double> weightByItemCatCarat = {};
+    final Map<String, double> weightByCatCarat = {};
 
     for (var item in items) {
       final qty = (item['quantity'] as num?)?.toInt() ?? (item['qty'] as num?)?.toInt() ?? 1;
@@ -158,12 +158,10 @@ class TSPLPrinter {
       }
       weightByCarat[caratKey] = (weightByCarat[caratKey] ?? 0.0) + itemTotWt;
 
-      final rawName = (item['itemName'] ?? item['item_name'] ?? '').toString().trim();
       final rawCat = (item['category'] ?? '').toString().trim();
-      final nameKey = rawName.isEmpty ? 'Item' : rawName;
       final catKey = rawCat.isEmpty ? 'Others' : rawCat;
-      final itemCatCaratKey = "$nameKey - $catKey - $caratKey";
-      weightByItemCatCarat[itemCatCaratKey] = (weightByItemCatCarat[itemCatCaratKey] ?? 0.0) + itemTotWt;
+      final catCaratKey = "$catKey - $caratKey";
+      weightByCatCarat[catCaratKey] = (weightByCatCarat[catCaratKey] ?? 0.0) + itemTotWt;
     }
 
     pdf.addPage(
@@ -257,7 +255,7 @@ class TSPLPrinter {
               ],
             ),
             pw.Divider(thickness: 0.5),
-            ...weightByItemCatCarat.entries.map((e) => pw.Padding(
+            ...weightByCatCarat.entries.map((e) => pw.Padding(
               padding: const pw.EdgeInsets.symmetric(vertical: 1),
               child: pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
