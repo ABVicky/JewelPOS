@@ -273,6 +273,7 @@ class TSPLPrinter {
                 ],
               ),
             )),
+            pw.Divider(thickness: 0.5),
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
