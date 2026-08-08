@@ -462,28 +462,40 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       final ByteData? rgbaData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
       if (rgbaData == null) return [];
 
-      final int width = image.width;
+      // 58mm thermal paper width is 384 dots (48 bytes per line)
+      const int targetImageWidth = 256;
+      final int rawWidth = image.width;
       final int height = image.height;
-      final int widthBytes = (width + 7) ~/ 8;
+      const int fullPaperWidthDots = 384;
+      const int fullWidthBytes = fullPaperWidthDots ~/ 8; // 48 bytes
+      final int leftPadDots = (fullPaperWidthDots - targetImageWidth) ~/ 2; // 64 dots (8 bytes)
+      final int leftPadBytes = leftPadDots ~/ 8;
 
       final List<int> escPos = [];
-      // GS v 0 0 (raster bit image, normal mode)
+      // GS v 0 0 (raster bit image mode, 384 dots wide)
       escPos.addAll([
         0x1D, 0x76, 0x30, 0x00,
-        widthBytes & 0xFF,
-        (widthBytes >> 8) & 0xFF,
+        fullWidthBytes & 0xFF,
+        (fullWidthBytes >> 8) & 0xFF,
         height & 0xFF,
         (height >> 8) & 0xFF,
       ]);
 
       final Uint8List rgba = rgbaData.buffer.asUint8List();
       for (int y = 0; y < height; y++) {
-        for (int xByte = 0; xByte < widthBytes; xByte++) {
+        // Left margin padding bytes to center image
+        for (int p = 0; p < leftPadBytes; p++) {
+          escPos.add(0x00);
+        }
+        // Image byte data
+        int imageBytesWritten = 0;
+        final int imgWidthBytes = (rawWidth + 7) ~/ 8;
+        for (int xByte = 0; xByte < imgWidthBytes; xByte++) {
           int byteVal = 0;
           for (int bit = 0; bit < 8; bit++) {
             int x = xByte * 8 + bit;
-            if (x < width) {
-              int offset = (y * width + x) * 4;
+            if (x < rawWidth) {
+              int offset = (y * rawWidth + x) * 4;
               int r = rgba[offset];
               int g = rgba[offset + 1];
               int b = rgba[offset + 2];
@@ -497,6 +509,12 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
             }
           }
           escPos.add(byteVal);
+          imageBytesWritten++;
+        }
+        // Right margin padding bytes to complete 48 bytes line
+        final int rightPadBytes = fullWidthBytes - leftPadBytes - imageBytesWritten;
+        for (int p = 0; p < rightPadBytes; p++) {
+          escPos.add(0x00);
         }
       }
       _cachedLogoEscBytes = escPos;
@@ -530,15 +548,15 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     bytes.addAll([0x1B, 0x21, 0x00]);
     bytes.addAll(utf8.encode("================================\n"));
 
-    // Header Table Columns (32 columns max for 58mm paper roll)
+    // Header Table Columns (32 columns for 58mm)
     bytes.addAll([0x1B, 0x61, 0x00]); // Left align
     bytes.addAll(utf8.encode("Item Name   Qty  Carat   Weight\n"));
-    bytes.addAll(utf8.encode("--------------------------------\n"));
+    bytes.addAll(utf8.encode("- - - - - - - - - - - - - - - -\n"));
 
     int totalQty = 0;
     double totalWeight = 0.0;
-    final Map<String, double> weightByCarat = {};
-    final Map<String, double> weightByItemCatCarat = {};
+    final Map<String, double> weightByItemCatCarat = {};  // item-cat-carat breakdown
+    final Map<String, double> weightByCatCarat = {};      // dark block summary
 
     for (var item in itemsToPrint) {
       final qty = item.quantity;
@@ -555,73 +573,76 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       } else {
         caratKey = rawPurity.toUpperCase();
       }
-      weightByCarat[caratKey] = (weightByCarat[caratKey] ?? 0.0) + itemTotWt;
 
       final nameKey = item.itemName.trim().isEmpty ? 'Item' : item.itemName.trim();
       final catKey = item.category.trim().isEmpty ? 'Others' : item.category.trim();
-      final itemCatCaratKey = "$nameKey - $catKey - $caratKey";
-      weightByItemCatCarat[itemCatCaratKey] = (weightByItemCatCarat[itemCatCaratKey] ?? 0.0) + itemTotWt;
 
+      final iccKey = '$nameKey - $catKey - $caratKey';
+      weightByItemCatCarat[iccKey] = (weightByItemCatCarat[iccKey] ?? 0.0) + itemTotWt;
+
+      final ccKey = '$catKey \u2013 $caratKey';
+      weightByCatCarat[ccKey] = (weightByCatCarat[ccKey] ?? 0.0) + itemTotWt;
+
+      // Item row: name(11) qty(3) carat(5) weight(8)
       final nameStr = item.itemName.length > 11
           ? item.itemName.substring(0, 11)
           : item.itemName.padRight(11);
       final qtyStr = qty.toString().padLeft(3);
-      final purityRaw = item.purity.isEmpty ? "-" : item.purity;
+      final purityRaw = item.purity.isEmpty ? '-' : item.purity;
       final caratStr = purityRaw.length > 5
           ? purityRaw.substring(0, 5).padLeft(5)
           : purityRaw.padLeft(5);
-      final wtStr = "${itemTotWt.toStringAsFixed(3)}g".padLeft(8);
+      final wtStr = '${itemTotWt.toStringAsFixed(3)}g'.padLeft(8);
 
-      bytes.addAll(utf8.encode("$nameStr $qtyStr  $caratStr  $wtStr\n"));
+      bytes.addAll(utf8.encode('$nameStr $qtyStr  $caratStr  $wtStr\n'));
     }
 
-    bytes.addAll(utf8.encode("--------------------------------\n"));
+    // Items count
+    bytes.addAll(utf8.encode('- - - - - - - - - - - - - - - -\n'));
     final countStr = totalQty.toString();
-    final countPad = ' ' * (32 - "Items".length - countStr.length);
-    bytes.addAll(utf8.encode("Items$countPad$countStr\n"));
-    bytes.addAll(utf8.encode("--------------------------------\n"));
+    final countPad = ' ' * (32 - 'Items'.length - countStr.length);
+    bytes.addAll(utf8.encode('Items$countPad$countStr\n'));
+    bytes.addAll(utf8.encode('- - - - - - - - - - - - - - - -\n'));
 
-    // Item - Category - Carat Separated Totals
+    // ── ITEM–CATEGORY–CARAT BREAKDOWN ──────────────────────────
+    // Line 1: "ItemName - Category - Carat" (left)
+    // Line 2: weight right-aligned
     for (var entry in weightByItemCatCarat.entries) {
       final label = entry.key;
-      final valStr = "${entry.value.toStringAsFixed(3)} g";
-      if (label.length + valStr.length + 1 <= 32) {
-        final padLen = 32 - label.length - valStr.length;
-        final pad = ' ' * (padLen > 0 ? padLen : 1);
-        bytes.addAll(utf8.encode("$label$pad$valStr\n"));
-      } else {
-        bytes.addAll(utf8.encode("$label\n"));
-        final padLen = 32 - valStr.length;
-        final pad = ' ' * (padLen > 0 ? padLen : 1);
-        bytes.addAll(utf8.encode("$pad$valStr\n"));
-      }
+      final valStr = '${entry.value.toStringAsFixed(3)} g';
+      bytes.addAll(utf8.encode('$label\n'));
+      final padLen = 32 - valStr.length;
+      final pad = ' ' * (padLen > 0 ? padLen : 0);
+      bytes.addAll(utf8.encode('$pad$valStr\n'));
     }
 
-    bytes.addAll(utf8.encode("--------------------------------\n"));
+    bytes.addAll(utf8.encode('- - - - - - - - - - - - - - - -\n'));
 
-    // Carat-Wise Summary Totals
-    for (var entry in weightByCarat.entries) {
-      final label = "Total ${entry.key}";
-      final valStr = "${entry.value.toStringAsFixed(3)} g";
+    // ── CATEGORY–CARAT SUMMARY BLOCK ──────────────────────────────
+    for (var entry in weightByCatCarat.entries) {
+      final label = entry.key;
+      final valStr = '${entry.value.toStringAsFixed(3)}g';
       final padLen = 32 - label.length - valStr.length;
       final pad = ' ' * (padLen > 0 ? padLen : 1);
-      bytes.addAll(utf8.encode("$label$pad$valStr\n"));
+      bytes.addAll(utf8.encode('$label$pad$valStr\n'));
     }
+    bytes.addAll(utf8.encode('- - - - - - - - - - - - - - - -\n'));
 
-    final totWtStr = "${totalWeight.toStringAsFixed(3)} g";
-    final wtPad = ' ' * (32 - "Total Weight".length - totWtStr.length);
-    bytes.addAll(utf8.encode("Total Weight$wtPad$totWtStr\n"));
-
-    bytes.addAll(utf8.encode("================================\n"));
+    // ── TOTAL WEIGHT ─────────────────────────────────────────────
+    final totWtStr = '${totalWeight.toStringAsFixed(3)} g';
+    final wtPad = ' ' * (32 - 'Total Weight:'.length - totWtStr.length);
+    bytes.addAll(utf8.encode('Total Weight:$wtPad$totWtStr\n'));
+    bytes.addAll(utf8.encode('================================\n'));
 
     // Footer
     bytes.addAll([0x1B, 0x61, 0x01]); // Center align
-    bytes.addAll(utf8.encode("Thank You\n\n\n"));
+    bytes.addAll(utf8.encode('Thank You\n\n\n'));
     // Feed and Cut (GS V 66 0)
     bytes.addAll([0x1D, 0x56, 0x42, 0x00]);
 
     return bytes;
   }
+
 
   static const _printerChannel = MethodChannel('jewel_pos/printer');
 
@@ -663,14 +684,15 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
   Future<bool> _printViaAndroidSystemManager({List<ScannedPosItem>? customList}) async {
     final itemsToPrint = customList ?? _scannedItems;
     final StringBuffer sb = StringBuffer();
-    sb.writeln("JEWEL POS");
-    sb.writeln("================================");
-    sb.writeln("Item Name   Qty  Carat   Weight");
-    sb.writeln("--------------------------------");
+    sb.writeln('JEWEL POS');
+    sb.writeln('================================');
+    sb.writeln('Item Name   Qty  Carat   Weight');
+    sb.writeln('- - - - - - - - - - - - - - - -');
+
     int totalQty = 0;
     double totalWeight = 0.0;
-    final Map<String, double> weightByCarat = {};
     final Map<String, double> weightByItemCatCarat = {};
+    final Map<String, double> weightByCatCarat = {};
 
     for (var item in itemsToPrint) {
       final qty = item.quantity;
@@ -687,61 +709,64 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
       } else {
         caratKey = rawPurity.toUpperCase();
       }
-      weightByCarat[caratKey] = (weightByCarat[caratKey] ?? 0.0) + itemTotWt;
 
       final nameKey = item.itemName.trim().isEmpty ? 'Item' : item.itemName.trim();
       final catKey = item.category.trim().isEmpty ? 'Others' : item.category.trim();
-      final itemCatCaratKey = "$nameKey - $catKey - $caratKey";
-      weightByItemCatCarat[itemCatCaratKey] = (weightByItemCatCarat[itemCatCaratKey] ?? 0.0) + itemTotWt;
+
+      final iccKey = '$nameKey - $catKey - $caratKey';
+      weightByItemCatCarat[iccKey] = (weightByItemCatCarat[iccKey] ?? 0.0) + itemTotWt;
+
+      final ccKey = '$catKey \u2013 $caratKey';
+      weightByCatCarat[ccKey] = (weightByCatCarat[ccKey] ?? 0.0) + itemTotWt;
 
       final nameStr = item.itemName.length > 11
           ? item.itemName.substring(0, 11)
           : item.itemName.padRight(11);
       final qtyStr = qty.toString().padLeft(3);
-      final purityRaw = item.purity.isEmpty ? "-" : item.purity;
+      final purityRaw = item.purity.isEmpty ? '-' : item.purity;
       final caratStr = purityRaw.length > 5
           ? purityRaw.substring(0, 5).padLeft(5)
           : purityRaw.padLeft(5);
-      final wtStr = "${itemTotWt.toStringAsFixed(3)}g".padLeft(8);
+      final wtStr = '${itemTotWt.toStringAsFixed(3)}g'.padLeft(8);
 
-      sb.writeln("$nameStr $qtyStr  $caratStr  $wtStr");
+      sb.writeln('$nameStr $qtyStr  $caratStr  $wtStr');
     }
-    sb.writeln("--------------------------------");
-    final countStr = totalQty.toString();
-    final countPad = ' ' * (32 - "Items".length - countStr.length);
-    sb.writeln("Items$countPad$countStr");
-    sb.writeln("--------------------------------");
 
+    // Items count
+    sb.writeln('- - - - - - - - - - - - - - - -');
+    final countStr = totalQty.toString();
+    final countPad = ' ' * (32 - 'Items'.length - countStr.length);
+    sb.writeln('Items$countPad$countStr');
+    sb.writeln('- - - - - - - - - - - - - - - -');
+
+    // Item–Category–Carat breakdown (2 lines per entry)
     for (var entry in weightByItemCatCarat.entries) {
       final label = entry.key;
-      final valStr = "${entry.value.toStringAsFixed(3)} g";
-      if (label.length + valStr.length + 1 <= 32) {
-        final padLen = 32 - label.length - valStr.length;
-        final pad = ' ' * (padLen > 0 ? padLen : 1);
-        sb.writeln("$label$pad$valStr");
-      } else {
-        sb.writeln(label);
-        final padLen = 32 - valStr.length;
-        final pad = ' ' * (padLen > 0 ? padLen : 1);
-        sb.writeln("$pad$valStr");
-      }
+      final valStr = '${entry.value.toStringAsFixed(3)} g';
+      sb.writeln(label);
+      final padLen = 32 - valStr.length;
+      final pad = ' ' * (padLen > 0 ? padLen : 0);
+      sb.writeln('$pad$valStr');
     }
 
-    sb.writeln("--------------------------------");
+    sb.writeln('- - - - - - - - - - - - - - - -');
 
-    for (var entry in weightByCarat.entries) {
-      final label = "Total ${entry.key}";
-      final valStr = "${entry.value.toStringAsFixed(3)} g";
+    // Category–Carat summary block
+    for (var entry in weightByCatCarat.entries) {
+      final label = entry.key;
+      final valStr = '${entry.value.toStringAsFixed(3)}g';
       final padLen = 32 - label.length - valStr.length;
       final pad = ' ' * (padLen > 0 ? padLen : 1);
-      sb.writeln("$label$pad$valStr");
+      sb.writeln('$label$pad$valStr');
     }
+    sb.writeln('- - - - - - - - - - - - - - - -');
 
-    final totWtStr = "${totalWeight.toStringAsFixed(3)} g";
-    final wtPad = ' ' * (32 - "Total Weight".length - totWtStr.length);
-    sb.writeln("Total Weight$wtPad$totWtStr");
-    sb.writeln("================================");
-    sb.writeln("Thank You");
+    // Total Weight
+    final totWtStr = '${totalWeight.toStringAsFixed(3)} g';
+    final wtPad = ' ' * (32 - 'Total Weight:'.length - totWtStr.length);
+    sb.writeln('Total Weight:$wtPad$totWtStr');
+    sb.writeln('================================');
+    sb.writeln('Thank You');
 
     final bytes = Uint8List.fromList(await _generateEscPosBytes(customList: customList));
 
@@ -756,6 +781,7 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
     }
     return false;
   }
+
 
   Future<void> _recordPrintLog(List<ScannedPosItem> itemsToPrint) async {
     try {

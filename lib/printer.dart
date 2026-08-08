@@ -117,7 +117,8 @@ class TSPLPrinter {
     }
   }
 
-  /// Generate standard receipt PDF with jewel_logo.png header at the top
+
+  /// Generate standard receipt PDF strictly matching the shop receipt layout
   static Future<Uint8List> generateReceiptPdfBytes(List<Map<String, dynamic>> items) async {
     final pdf = pw.Document();
     pw.MemoryImage? logoImage;
@@ -135,19 +136,27 @@ class TSPLPrinter {
       marginAll: 2 * PdfPageFormat.mm,
     );
 
+    // ── Compute summaries ──────────────────────────────────────────
     int totalQty = 0;
     double totalWeight = 0.0;
+
+    // "ItemName - Category - Carat" → weight  (middle breakdown section)
+    final Map<String, double> weightByItemCatCarat = {};
+
+    // "Category – Carat" → weight  (dark summary block)
     final Map<String, double> weightByCatCarat = {};
 
     for (var item in items) {
       final qty = (item['quantity'] as num?)?.toInt() ?? (item['qty'] as num?)?.toInt() ?? 1;
       final wt = (item['weight'] as num?)?.toDouble() ?? 0.0;
-      final itemTotWt = wt * qty;
+      final rowWt = wt * qty;
       totalQty += qty;
-      totalWeight += itemTotWt;
+      totalWeight += rowWt;
+
+      final name = (item['itemName'] ?? item['item_name'] ?? '').toString().trim();
 
       final rawPurity = (item['purity'] ?? item['carat'] ?? '').toString().trim();
-      String caratKey;
+      final String caratKey;
       if (rawPurity.isEmpty) {
         caratKey = 'Other';
       } else if (!rawPurity.toUpperCase().endsWith('K') && RegExp(r'^\d+$').hasMatch(rawPurity)) {
@@ -158,135 +167,190 @@ class TSPLPrinter {
 
       final rawCat = (item['category'] ?? '').toString().trim();
       final catKey = rawCat.isEmpty ? 'Others' : rawCat;
-      final catCaratKey = "$catKey - $caratKey";
-      weightByCatCarat[catCaratKey] = (weightByCatCarat[catCaratKey] ?? 0.0) + itemTotWt;
+
+      final iccKey = '$name - $catKey - $caratKey';
+      weightByItemCatCarat[iccKey] = (weightByItemCatCarat[iccKey] ?? 0.0) + rowWt;
+
+      final ccKey = '$catKey \u2013 $caratKey';
+      weightByCatCarat[ccKey] = (weightByCatCarat[ccKey] ?? 0.0) + rowWt;
     }
+
+    const String dashes = '- - - - - - - - - - - - - - - - - - - - - - -';
+    const String equals = '================================';
+
+    const colWidths = {
+      0: pw.FlexColumnWidth(4.5), // Item Name
+      1: pw.FlexColumnWidth(1.2), // Qty
+      2: pw.FlexColumnWidth(2.0), // Carat
+      3: pw.FlexColumnWidth(3.0), // Weight
+    };
 
     pdf.addPage(
       pw.MultiPage(
         pageFormat: pageFormat,
         build: (pw.Context context) {
           return [
+            // ── HEADER ─────────────────────────────────────────────────
             if (logoImage != null)
-              pw.Center(
-                child: pw.Image(logoImage, width: 100),
-              ),
-            pw.SizedBox(height: 4),
-            pw.Center(
-              child: pw.Text('JEWEL POS', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
-            ),
-            pw.Center(
-              child: pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
-            ),
+              pw.Center(child: pw.Image(logoImage, width: 80)),
             pw.SizedBox(height: 2),
+            pw.Center(
+              child: pw.Text('JEWEL POS',
+                  style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
+            ),
+            pw.Center(
+              child: pw.Text(equals, style: const pw.TextStyle(fontSize: 7.5)),
+            ),
+            pw.SizedBox(height: 3),
+
+            // ── ITEMS TABLE HEADER ──────────────────────────────────────
             pw.Table(
-              columnWidths: const {
-                0: pw.FlexColumnWidth(4.5),
-                1: pw.FlexColumnWidth(1.5),
-                2: pw.FlexColumnWidth(2.0),
-                3: pw.FlexColumnWidth(3.0),
-              },
+              columnWidths: colWidths,
               children: [
-                pw.TableRow(
-                  decoration: const pw.BoxDecoration(
-                    border: pw.Border(bottom: pw.BorderSide(width: 0.5, color: PdfColors.black)),
+                pw.TableRow(children: [
+                  pw.Text('Item Name',
+                      style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold)),
+                  pw.Text('Qty',
+                      style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold),
+                      textAlign: pw.TextAlign.center),
+                  pw.Text('Carat',
+                      style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold),
+                      textAlign: pw.TextAlign.center),
+                  pw.Text('Weight',
+                      style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold),
+                      textAlign: pw.TextAlign.right),
+                ]),
+              ],
+            ),
+            pw.Text(dashes, style: const pw.TextStyle(fontSize: 6)),
+            pw.SizedBox(height: 1),
+
+            // ── ITEMS TABLE ROWS ────────────────────────────────────────
+            pw.Table(
+              columnWidths: colWidths,
+              children: items.map((item) {
+                final name = (item['itemName'] ?? item['item_name'] ?? '').toString();
+                final qty = (item['quantity'] as num?)?.toInt() ?? (item['qty'] as num?)?.toInt() ?? 1;
+                final purity = (item['purity'] ?? item['carat'] ?? '').toString();
+                final wt = (item['weight'] as num?)?.toDouble() ?? 0.0;
+                final rowWt = wt * qty;
+                return pw.TableRow(children: [
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+                    child: pw.Text(name,
+                        style: const pw.TextStyle(fontSize: 7),
+                        maxLines: 1,
+                        overflow: pw.TextOverflow.clip),
                   ),
-                  children: [
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(vertical: 2),
-                      child: pw.Text('Item Name', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold)),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(vertical: 2),
-                      child: pw.Text('Qty', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.right),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(vertical: 2),
-                      child: pw.Text('Carat', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.right),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(vertical: 2),
-                      child: pw.Text('Weight', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.right),
-                    ),
-                  ],
-                ),
-                ...items.map((item) {
-                  final name = (item['itemName'] ?? item['item_name'] ?? '').toString();
-                  final qty = (item['quantity'] as num?)?.toInt() ?? (item['qty'] as num?)?.toInt() ?? 1;
-                  final purity = (item['purity'] ?? item['carat'] ?? '').toString();
-                  final wt = (item['weight'] as num?)?.toDouble() ?? 0.0;
-                  final itemTotWt = wt * qty;
-                  return pw.TableRow(
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+                    child: pw.Text('$qty',
+                        style: const pw.TextStyle(fontSize: 7),
+                        textAlign: pw.TextAlign.center),
+                  ),
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+                    child: pw.Text(purity.isEmpty ? '-' : purity,
+                        style: const pw.TextStyle(fontSize: 7),
+                        textAlign: pw.TextAlign.center),
+                  ),
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+                    child: pw.Text('${rowWt.toStringAsFixed(3)}g',
+                        style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
+                        textAlign: pw.TextAlign.right),
+                  ),
+                ]);
+              }).toList(),
+            ),
+            pw.SizedBox(height: 3),
+
+            // ── ITEMS COUNT ─────────────────────────────────────────────
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Items', style: const pw.TextStyle(fontSize: 8)),
+                pw.Text('$totalQty',
+                    style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
+            pw.SizedBox(height: 3),
+            pw.Text(dashes, style: const pw.TextStyle(fontSize: 6)),
+            pw.SizedBox(height: 3),
+
+            // ── ITEM – CATEGORY – CARAT BREAKDOWN ──────────────────────
+            // Line 1: "ItemName - Category - Carat"  (left-aligned, 7pt)
+            // Line 2: weight right-aligned (bold 7.5pt)
+            ...weightByItemCatCarat.entries.map((e) => pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 2.5),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+                      pw.Text(e.key, style: const pw.TextStyle(fontSize: 7)),
+                      pw.Align(
+                        alignment: pw.Alignment.centerRight,
                         child: pw.Text(
-                          name,
-                          style: const pw.TextStyle(fontSize: 7),
-                          maxLines: 1,
-                          overflow: pw.TextOverflow.clip,
+                          '${e.value.toStringAsFixed(3)} g',
+                          style: pw.TextStyle(
+                              fontSize: 7.5, fontWeight: pw.FontWeight.bold),
                         ),
                       ),
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
-                        child: pw.Text('$qty', style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.right),
-                      ),
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
-                        child: pw.Text(purity.isEmpty ? '-' : purity, style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.right),
-                      ),
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
-                        child: pw.Text('${itemTotWt.toStringAsFixed(3)}g', style: const pw.TextStyle(fontSize: 7), textAlign: pw.TextAlign.right),
-                      ),
                     ],
-                  );
-                }),
-              ],
+                  ),
+                )),
+            pw.SizedBox(height: 2),
+            pw.Text(dashes, style: const pw.TextStyle(fontSize: 6)),
+            pw.SizedBox(height: 2),
+
+            // ── CATEGORY – CARAT SUMMARY ─────────────────────────────────
+            // Black text on thermal white background, bold weights
+            pw.Column(
+              children: weightByCatCarat.entries
+                  .map((e) => pw.Padding(
+                        padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+                        child: pw.Row(
+                          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                          children: [
+                            pw.Expanded(
+                              child: pw.Text(e.key,
+                                  style: const pw.TextStyle(fontSize: 7.5)),
+                            ),
+                            pw.SizedBox(width: 4),
+                            pw.Text('${e.value.toStringAsFixed(3)}g',
+                                style: pw.TextStyle(
+                                    fontSize: 7.5,
+                                    fontWeight: pw.FontWeight.bold)),
+                          ],
+                        ),
+                      ))
+                  .toList(),
             ),
-            pw.Divider(thickness: 0.5),
+            pw.SizedBox(height: 3),
+            pw.Text(dashes, style: const pw.TextStyle(fontSize: 6)),
+            pw.SizedBox(height: 3),
+
+            // ── TOTAL WEIGHT ────────────────────────────────────────────
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                pw.Text('Items:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                pw.Text('$totalQty', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                pw.Text('Total Weight:',
+                    style:
+                        pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                pw.Text('${totalWeight.toStringAsFixed(3)} g',
+                    style:
+                        pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
               ],
             ),
-            pw.Divider(thickness: 0.5),
-            ...weightByCatCarat.entries.map((e) => pw.Padding(
-              padding: const pw.EdgeInsets.symmetric(vertical: 1),
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Expanded(
-                    child: pw.Text(
-                      e.key,
-                      style: const pw.TextStyle(fontSize: 7),
-                    ),
-                  ),
-                  pw.SizedBox(width: 4),
-                  pw.Text(
-                    '${e.value.toStringAsFixed(3)} g',
-                    style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
-                  ),
-                ],
-              ),
-            )),
-            pw.Divider(thickness: 0.5),
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text('Total Weight:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                pw.Text('${totalWeight.toStringAsFixed(3)} g', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-              ],
-            ),
+            pw.SizedBox(height: 2),
             pw.Center(
-              child: pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
+              child: pw.Text(equals, style: const pw.TextStyle(fontSize: 7.5)),
             ),
             pw.SizedBox(height: 4),
+
+            // ── FOOTER ──────────────────────────────────────────────────
             pw.Center(
-              child: pw.Text('Thank You', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+              child: pw.Text('Thank You',
+                  style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
             ),
           ];
         },
@@ -295,6 +359,7 @@ class TSPLPrinter {
 
     return pdf.save();
   }
+
 
   /// Generate Day-Wise End of Day Report PDF Document with jewel_logo.png header
   static Future<Uint8List> generateDailyReportPdfBytes(String date, List<PrintLog> logs) async {

@@ -30,7 +30,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
   String _selectedCategoryOption = 'Pure Gold';
   final _customCategoryController = TextEditingController();
 
-  final _purityNumberController = TextEditingController(text: '22');
+  final _purityNumberController = TextEditingController(text: '9');
   final _weightController = TextEditingController();
   String _generatedBarcode = 'JMT000000001';
 
@@ -209,7 +209,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     _nameController.clear();
     _weightController.clear();
     _customCategoryController.clear();
-    _purityNumberController.text = '22';
+    _purityNumberController.text = '9';
     setState(() {
       _selectedCategoryOption = 'Pure Gold';
     });
@@ -812,7 +812,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     final customCatCtrl = TextEditingController(text: _categoryOptions.contains(item.category) ? '' : item.category);
 
     final rawPurity = item.purity.replaceAll(RegExp(r'[^0-9]'), '');
-    final purityNumCtrl = TextEditingController(text: rawPurity.isEmpty ? '22' : rawPurity);
+    final purityNumCtrl = TextEditingController(text: rawPurity.isEmpty ? '9' : rawPurity);
     final weightCtrl = TextEditingController(text: item.weight.toStringAsFixed(3));
     final editFormKey = GlobalKey<FormState>();
 
