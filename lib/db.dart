@@ -157,6 +157,10 @@ class InventoryDB {
         items_json TEXT
       )
     ''');
+    // Indexes for fast search and range queries
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_inventory_barcode ON Inventory(barcode)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_inventory_item_name ON Inventory(item_name)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_inventory_category ON Inventory(category)');
   }
 
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -171,6 +175,10 @@ class InventoryDB {
         items_json TEXT
       )
     ''');
+    // Ensure indexes exist after upgrade
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_inventory_barcode ON Inventory(barcode)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_inventory_item_name ON Inventory(item_name)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_inventory_category ON Inventory(category)');
   }
 
   static Future<String> generateNextBarcode() async {
@@ -231,16 +239,130 @@ class InventoryDB {
     return res.map((map) => InventoryItem.fromMap(map)).toList();
   }
 
-  static Future<List<InventoryItem>> searchItems(String query) async {
+  /// Returns total number of items in Inventory (very fast — uses COUNT).
+  static Future<int> getTotalCount() async {
+    final db = await instance;
+    final res = await db.rawQuery('SELECT COUNT(*) AS cnt FROM Inventory');
+    return (res.first['cnt'] as int?) ?? 0;
+  }
+
+  /// Returns a single page of items (50 rows by default).
+  static Future<List<InventoryItem>> getItemsPaginated(int offset, int limit) async {
+    final db = await instance;
+    final res = await db.query(
+      'Inventory',
+      orderBy: 'id DESC',
+      limit: limit,
+      offset: offset,
+    );
+    return res.map((map) => InventoryItem.fromMap(map)).toList();
+  }
+
+  /// Returns count of rows matching the search/range filter.
+  static Future<int> getFilteredCount(
+    String query, {
+    int? fromSerial,
+    int? toSerial,
+  }) async {
     final db = await instance;
     final q = '%${query.trim().toLowerCase()}%';
-    final res = await db.rawQuery('''
-      SELECT * FROM Inventory 
-      WHERE LOWER(barcode) LIKE ? 
-         OR LOWER(item_name) LIKE ? 
-         OR LOWER(category) LIKE ?
-      ORDER BY id DESC
-    ''', [q, q, q]);
+    final bool hasText = query.trim().isNotEmpty;
+    final bool hasRange = fromSerial != null || toSerial != null;
+
+    if (!hasText && !hasRange) return getTotalCount();
+
+    final List<String> whereParts = [];
+    final List<dynamic> args = [];
+
+    if (hasText) {
+      whereParts.add('(LOWER(barcode) LIKE ? OR LOWER(item_name) LIKE ? OR LOWER(category) LIKE ? OR LOWER(purity) LIKE ?)');
+      args.addAll([q, q, q, q]);
+    }
+    if (fromSerial != null) {
+      whereParts.add('CAST(SUBSTR(barcode, 4) AS INTEGER) >= ?');
+      args.add(fromSerial);
+    }
+    if (toSerial != null) {
+      whereParts.add('CAST(SUBSTR(barcode, 4) AS INTEGER) <= ?');
+      args.add(toSerial);
+    }
+
+    final where = whereParts.join(' AND ');
+    final res = await db.rawQuery('SELECT COUNT(*) AS cnt FROM Inventory WHERE $where', args);
+    return (res.first['cnt'] as int?) ?? 0;
+  }
+
+  /// Returns a paginated page of filtered/searched results.
+  static Future<List<InventoryItem>> searchPaginated(
+    String query,
+    int offset,
+    int limit, {
+    int? fromSerial,
+    int? toSerial,
+  }) async {
+    final db = await instance;
+    final q = '%${query.trim().toLowerCase()}%';
+    final bool hasText = query.trim().isNotEmpty;
+    final bool hasRange = fromSerial != null || toSerial != null;
+
+    if (!hasText && !hasRange) {
+      return getItemsPaginated(offset, limit);
+    }
+
+    final List<String> whereParts = [];
+    final List<dynamic> args = [];
+
+    if (hasText) {
+      whereParts.add('(LOWER(barcode) LIKE ? OR LOWER(item_name) LIKE ? OR LOWER(category) LIKE ? OR LOWER(purity) LIKE ?)');
+      args.addAll([q, q, q, q]);
+    }
+    if (fromSerial != null) {
+      whereParts.add('CAST(SUBSTR(barcode, 4) AS INTEGER) >= ?');
+      args.add(fromSerial);
+    }
+    if (toSerial != null) {
+      whereParts.add('CAST(SUBSTR(barcode, 4) AS INTEGER) <= ?');
+      args.add(toSerial);
+    }
+
+    final where = whereParts.join(' AND ');
+    final res = await db.rawQuery(
+      'SELECT * FROM Inventory WHERE $where ORDER BY id DESC LIMIT ? OFFSET ?',
+      [...args, limit, offset],
+    );
+    return res.map((map) => InventoryItem.fromMap(map)).toList();
+  }
+
+  /// Returns only the barcode strings for items in a serial number range.
+  /// Used by "Select Range" without loading full item objects.
+  static Future<List<String>> getBarcodesInRange(int? from, int? to) async {
+    if (from == null && to == null) return [];
+    final db = await instance;
+    final List<String> whereParts = [];
+    final List<dynamic> args = [];
+    if (from != null) {
+      whereParts.add('CAST(SUBSTR(barcode, 4) AS INTEGER) >= ?');
+      args.add(from);
+    }
+    if (to != null) {
+      whereParts.add('CAST(SUBSTR(barcode, 4) AS INTEGER) <= ?');
+      args.add(to);
+    }
+    final where = whereParts.join(' AND ');
+    final res = await db.rawQuery('SELECT barcode FROM Inventory WHERE $where', args);
+    return res.map((row) => row['barcode'] as String).toList();
+  }
+
+  /// Returns full item objects for a given list of barcodes.
+  /// Used by "Print Selected" to fetch items across pages.
+  static Future<List<InventoryItem>> getItemsByBarcodes(List<String> barcodes) async {
+    if (barcodes.isEmpty) return [];
+    final db = await instance;
+    final placeholders = List.filled(barcodes.length, '?').join(',');
+    final res = await db.rawQuery(
+      'SELECT * FROM Inventory WHERE barcode IN ($placeholders) ORDER BY id DESC',
+      barcodes,
+    );
     return res.map((map) => InventoryItem.fromMap(map)).toList();
   }
 

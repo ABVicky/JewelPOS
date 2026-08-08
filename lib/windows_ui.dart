@@ -3,6 +3,7 @@
  * Website: https://www.manikarnikatechnologies.in
  */
 
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -37,10 +38,23 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
   final _searchController = TextEditingController();
   final _rangeFromController = TextEditingController();
   final _rangeToController = TextEditingController();
-  List<InventoryItem> _allItems = [];
-  List<InventoryItem> _filteredItems = [];
+
+  /// Only holds the current page (max _pageSize rows). Never the full DB.
+  List<InventoryItem> _displayedItems = [];
   Set<String> _selectedBarcodes = {};
   bool _isLoading = true;
+
+  // Pagination state
+  int _currentPage = 0;
+  static const int _pageSize = 50;
+  int _totalCount = 0;
+
+  // Active filter state (kept for re-use across page turns)
+  String _searchQuery = '';
+  int? _fromSerial;
+  int? _toSerial;
+
+  Timer? _debounceTimer;
 
   // Settings State
   int _httpServerPort = 8080;
@@ -66,11 +80,12 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
   void initState() {
     super.initState();
     _loadSettings();
-    _refreshData();
+    _loadPage(page: 0);
   }
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _nameController.dispose();
     _customCategoryController.dispose();
     _purityNumberController.dispose();
@@ -107,76 +122,64 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     }
   }
 
-  Future<void> _refreshData() async {
+  /// Loads exactly _pageSize rows for the given page from SQLite.
+  /// This is O(1) regardless of total DB size — only 50 rows are ever fetched.
+  Future<void> _loadPage({int page = -1}) async {
+    if (page >= 0) _currentPage = page;
     setState(() => _isLoading = true);
     try {
-      final nextBarcode = await InventoryDB.generateNextBarcode();
-      final items = await InventoryDB.getAllItems();
+      final offset = _currentPage * _pageSize;
+      final results = await Future.wait([
+        InventoryDB.searchPaginated(
+          _searchQuery,
+          offset,
+          _pageSize,
+          fromSerial: _fromSerial,
+          toSerial: _toSerial,
+        ),
+        InventoryDB.getFilteredCount(
+          _searchQuery,
+          fromSerial: _fromSerial,
+          toSerial: _toSerial,
+        ),
+        InventoryDB.generateNextBarcode(),
+      ]);
       if (!mounted) return;
       setState(() {
-        _generatedBarcode = nextBarcode;
-        _allItems = items;
-        _applySearch();
+        _displayedItems = results[0] as List<InventoryItem>;
+        _totalCount = results[1] as int;
+        _generatedBarcode = results[2] as String;
         _isLoading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      _showErrorDialog('Database Error', 'Could not access database: $e');
+      _showErrorDialog('Database Error', 'Could not load inventory: $e');
     }
   }
 
-  int? _getBarcodeNumericValue(String barcode) {
-    final numStr = barcode.replaceAll(RegExp(r'[^0-9]'), '');
-    if (numStr.isEmpty) return null;
-    return int.tryParse(numStr);
+  /// Debounced search — waits 300ms after the last keystroke before querying DB.
+  void _onSearchChanged() {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      _searchQuery = _searchController.text.trim();
+
+      // Auto-detect hyphenated range pattern like "400-600" in search box
+      final rangeMatch = RegExp(r'^(?:[A-Za-z]*)(\d+)\s*-\s*(?:[A-Za-z]*)(\d+)$')
+          .firstMatch(_searchQuery);
+      if (rangeMatch != null) {
+        _fromSerial = int.tryParse(rangeMatch.group(1)!);
+        _toSerial = int.tryParse(rangeMatch.group(2)!);
+      } else {
+        _fromSerial = int.tryParse(_rangeFromController.text.trim());
+        _toSerial = int.tryParse(_rangeToController.text.trim());
+      }
+
+      _loadPage(page: 0);
+    });
   }
 
-  int _getSerialNumber(InventoryItem item) {
-    final numVal = _getBarcodeNumericValue(item.barcode);
-    if (numVal != null) return numVal;
-    return item.id ?? 0;
-  }
-
-  void _applySearch() {
-    final rawQuery = _searchController.text.trim();
-    final query = rawQuery.toLowerCase();
-
-    int? fromRange = int.tryParse(_rangeFromController.text.trim());
-    int? toRange = int.tryParse(_rangeToController.text.trim());
-
-    // Auto-detect hyphenated range pattern in search query e.g. "400-600"
-    final rangeMatch = RegExp(r'^(?:[A-Za-z]*)(\d+)\s*-\s*(?:[A-Za-z]*)(\d+)$').firstMatch(rawQuery);
-    if (rangeMatch != null) {
-      fromRange = int.tryParse(rangeMatch.group(1)!);
-      toRange = int.tryParse(rangeMatch.group(2)!);
-    }
-
-    if (query.isEmpty && fromRange == null && toRange == null) {
-      _filteredItems = List.from(_allItems);
-    } else {
-      _filteredItems = _allItems.where((item) {
-        final slNo = _getSerialNumber(item);
-
-        // Apply numeric serial number range filter if set
-        if (fromRange != null || toRange != null) {
-          if (fromRange != null && slNo < fromRange) return false;
-          if (toRange != null && slNo > toRange) return false;
-        }
-
-        if (rangeMatch != null) return true;
-        if (query.isEmpty) return true;
-
-        return item.barcode.toLowerCase().contains(query) ||
-            item.itemName.toLowerCase().contains(query) ||
-            item.category.toLowerCase().contains(query) ||
-            item.purity.toLowerCase().contains(query) ||
-            slNo.toString() == query;
-      }).toList();
-    }
-  }
-
-  void _selectRange() {
+  Future<void> _selectRange() async {
     final from = int.tryParse(_rangeFromController.text.trim());
     final to = int.tryParse(_rangeToController.text.trim());
     if (from == null && to == null) {
@@ -186,24 +189,20 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
       return;
     }
 
+    // Fetch only barcodes from DB — does NOT load full item objects into memory
+    final barcodes = await InventoryDB.getBarcodesInRange(from, to);
     setState(() {
-      for (final item in _allItems) {
-        final slNo = _getSerialNumber(item);
-        bool match = true;
-        if (from != null && slNo < from) match = false;
-        if (to != null && slNo > to) match = false;
-        if (match) {
-          _selectedBarcodes.add(item.barcode);
-        }
-      }
+      _selectedBarcodes.addAll(barcodes);
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Selected all items in Serial No. range ${from ?? ''} - ${to ?? ''}.'),
-        backgroundColor: const Color(0xFF0F172A),
-      ),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Selected ${barcodes.length} items in Serial No. range ${from ?? ''} - ${to ?? ''}.'),
+          backgroundColor: const Color(0xFF0F172A),
+        ),
+      );
+    }
   }
 
   void _clearForm() {
@@ -214,7 +213,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     setState(() {
       _selectedCategoryOption = 'Pure Gold';
     });
-    _refreshData();
+    // Do NOT trigger a page reload here — callers handle it.
   }
 
   Future<void> _saveOnly() async {
@@ -242,8 +241,31 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
 
     try {
       await InventoryDB.insertItem(item);
-      await _refreshData();
+
+      // Compute next barcode in-memory — no extra DB query
+      final numStr = barcode.replaceAll(RegExp(r'[^0-9]'), '');
+      final nextNum = (int.tryParse(numStr) ?? 0) + 1;
+      final nextBarcode = 'JMT${nextNum.toString().padLeft(9, '0')}';
+
+      // Go to page 0 (new item appears at top since ORDER BY id DESC)
+      // _loadPage(page:0) fetches only 50 rows — O(1), instant
+      _searchQuery = '';
+      _fromSerial = null;
+      _toSerial = null;
+      _searchController.clear();
+      _rangeFromController.clear();
+      _rangeToController.clear();
+
+      await _loadPage(page: 0);
+
+      // Override barcode with computed value to avoid a second DB query
+      setState(() {
+        _generatedBarcode = nextBarcode;
+        _totalCount = _totalCount + 1;
+      });
+
       _clearForm();
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -280,17 +302,45 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     );
 
     // 1. ALWAYS SAVE to Database first so data is never lost!
+    int newId;
     try {
-      await InventoryDB.insertItem(item);
-      await _refreshData();
-      _clearForm();
+      newId = await InventoryDB.insertItem(item);
     } catch (e) {
       _showErrorDialog('Database Error', 'Could not save item to database.');
       return;
     }
 
-    // 2. Direct label printing
-    bool printSuccess = await TSPLPrinter.sendTSPLToPrinter(item);
+    final savedItem = InventoryItem(
+      id: newId,
+      barcode: barcode,
+      itemName: name,
+      category: category,
+      purity: purity,
+      weight: weight,
+    );
+
+    // Compute next barcode in-memory
+    final numStr = barcode.replaceAll(RegExp(r'[^0-9]'), '');
+    final nextNum = (int.tryParse(numStr) ?? 0) + 1;
+    final nextBarcode = 'JMT${nextNum.toString().padLeft(9, '0')}';
+
+    // Go to page 0 so new item is visible
+    _searchQuery = '';
+    _fromSerial = null;
+    _toSerial = null;
+    _searchController.clear();
+    _rangeFromController.clear();
+    _rangeToController.clear();
+
+    await _loadPage(page: 0);
+    setState(() {
+      _generatedBarcode = nextBarcode;
+      _totalCount = _totalCount + 1;
+    });
+    _clearForm();
+
+    // 2. Direct label printing (runs after UI is already updated)
+    bool printSuccess = await TSPLPrinter.sendTSPLToPrinter(savedItem);
 
     if (!mounted) return;
 
@@ -341,7 +391,8 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
       return;
     }
 
-    final itemsToPrint = _allItems.where((item) => _selectedBarcodes.contains(item.barcode)).toList();
+    // Fetch only the selected items from DB — does not load all rows
+    final itemsToPrint = await InventoryDB.getItemsByBarcodes(_selectedBarcodes.toList());
     bool ok = await TSPLPrinter.sendMultipleTSPLToPrinter(itemsToPrint);
 
     if (!mounted) return;
@@ -387,10 +438,13 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     if (confirm == true) {
       try {
         final deleted = await InventoryDB.deleteItemsByBarcodes(_selectedBarcodes.toList());
+        final prevCount = _totalCount;
         setState(() {
           _selectedBarcodes.clear();
         });
-        await _refreshData();
+        // Go to page 0 after bulk delete; update count
+        await _loadPage(page: 0);
+        setState(() => _totalCount = (prevCount - deleted).clamp(0, prevCount));
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -433,8 +487,15 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     if (confirm == true && item.id != null) {
       try {
         await InventoryDB.deleteItem(item.id!);
-        _selectedBarcodes.remove(item.barcode);
-        await _refreshData();
+        setState(() {
+          _displayedItems.removeWhere((i) => i.id == item.id);
+          _selectedBarcodes.remove(item.barcode);
+          _totalCount = (_totalCount - 1).clamp(0, _totalCount);
+        });
+        // If this was the last item on the page and not page 0, go back one page
+        if (_displayedItems.isEmpty && _currentPage > 0) {
+          await _loadPage(page: _currentPage - 1);
+        }
       } catch (e) {
         _showErrorDialog('Delete Error', 'Could not delete item.');
       }
@@ -719,7 +780,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                   onTap: () async {
                     Navigator.of(ctx).pop();
                     await InventoryDB.restoreDatabase(file);
-                    await _refreshData();
+                    await _loadPage(page: 0);
                     if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
@@ -881,7 +942,11 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                 try {
                   await InventoryDB.updateItem(updatedItem);
                   if (ctx.mounted) Navigator.of(ctx).pop();
-                  _refreshData();
+                  // Update in-memory displayed page instantly — no DB reload needed
+                  setState(() {
+                    final idx = _displayedItems.indexWhere((i) => i.id == updatedItem.id);
+                    if (idx != -1) _displayedItems[idx] = updatedItem;
+                  });
                 } catch (e) {
                   _showErrorDialog('Database Error', 'Update failed.');
                 }
@@ -1190,7 +1255,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
 
   @override
   Widget build(BuildContext context) {
-    final isAllSelected = _filteredItems.isNotEmpty && _filteredItems.every((item) => _selectedBarcodes.contains(item.barcode));
+    final isAllSelected = _displayedItems.isNotEmpty && _displayedItems.every((item) => _selectedBarcodes.contains(item.barcode));
 
     return Scaffold(
       backgroundColor: const Color(0xFFE2E8F0),
@@ -1526,7 +1591,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                       ],
                       const SizedBox(width: 12),
                       Text(
-                        'Total Items: ${_filteredItems.length}',
+                        'Total: $_totalCount items  |  Page ${_currentPage + 1} of ${(_totalCount / _pageSize).ceil().clamp(1, double.infinity).toInt()}',
                         style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
                       ),
                     ],
@@ -1538,8 +1603,8 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                     children: [
                       Expanded(
                         child: TextField(
-                          controller: _searchController,
-                          onChanged: (_) => setState(() => _applySearch()),
+                      controller: _searchController,
+                          onChanged: (_) => _onSearchChanged(),
                           decoration: InputDecoration(
                             hintText: 'Search by Name, Category, Barcode, or Serial No. Range (e.g. 400-600)...',
                             prefixIcon: const Icon(Icons.search),
@@ -1550,7 +1615,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                                       _searchController.clear();
                                       _rangeFromController.clear();
                                       _rangeToController.clear();
-                                      setState(() => _applySearch());
+                                      _onSearchChanged();
                                     },
                                   )
                                 : null,
@@ -1565,7 +1630,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                         child: TextField(
                           controller: _rangeFromController,
                           keyboardType: TextInputType.number,
-                          onChanged: (_) => setState(() => _applySearch()),
+                          onChanged: (_) => _onSearchChanged(),
                           decoration: const InputDecoration(
                             labelText: 'From Sl. No.',
                             hintText: '400',
@@ -1580,7 +1645,7 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                         child: TextField(
                           controller: _rangeToController,
                           keyboardType: TextInputType.number,
-                          onChanged: (_) => setState(() => _applySearch()),
+                          onChanged: (_) => _onSearchChanged(),
                           decoration: const InputDecoration(
                             labelText: 'To Sl. No.',
                             hintText: '600',
@@ -1605,157 +1670,209 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Inventory Table
+                  // Inventory Table + Pagination
                   Expanded(
                     child: _isLoading
                         ? const Center(child: CircularProgressIndicator())
-                        : _filteredItems.isEmpty
+                        : _displayedItems.isEmpty
                             ? const Center(
                                 child: Text(
                                   'No items found in inventory database.',
                                   style: TextStyle(fontSize: 16, color: Colors.grey, fontWeight: FontWeight.bold),
                                 ),
                               )
-                            : SingleChildScrollView(
-                                scrollDirection: Axis.vertical,
-                                child: SizedBox(
-                                  width: double.infinity,
-                                  child: DataTable(
-                                    showCheckboxColumn: false,
-                                    headingRowColor: WidgetStateProperty.all(const Color(0xFFF1F5F9)),
-                                    dataRowMinHeight: 48,
-                                    dataRowMaxHeight: 48,
-                                    columns: [
-                                      DataColumn(
-                                        label: Checkbox(
-                                          value: isAllSelected,
-                                          onChanged: (val) {
-                                            setState(() {
-                                              if (val == true) {
-                                                _selectedBarcodes = _filteredItems.map((e) => e.barcode).toSet();
-                                              } else {
-                                                _selectedBarcodes.clear();
-                                              }
-                                            });
-                                          },
-                                        ),
-                                      ),
-                                      const DataColumn(label: Text('Sl. No.', style: TextStyle(fontWeight: FontWeight.bold))),
-                                      const DataColumn(label: Text('Barcode', style: TextStyle(fontWeight: FontWeight.bold))),
-                                      const DataColumn(label: Text('Item Name', style: TextStyle(fontWeight: FontWeight.bold))),
-                                      const DataColumn(label: Text('Category', style: TextStyle(fontWeight: FontWeight.bold))),
-                                      const DataColumn(label: Text('Purity', style: TextStyle(fontWeight: FontWeight.bold))),
-                                      const DataColumn(label: Text('Weight (g)', style: TextStyle(fontWeight: FontWeight.bold))),
-                                      const DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
-                                    ],
-                                    rows: _filteredItems.map((item) {
-                                      final isSelected = _selectedBarcodes.contains(item.barcode);
-                                      final slNo = _getSerialNumber(item);
-                                      return DataRow(
-                                        selected: isSelected,
-                                        onSelectChanged: (selected) {
-                                          setState(() {
-                                            if (selected == true) {
-                                              _selectedBarcodes.add(item.barcode);
-                                            } else {
-                                              _selectedBarcodes.remove(item.barcode);
-                                            }
-                                          });
-                                        },
-                                        cells: [
-                                          DataCell(
-                                            Checkbox(
-                                              value: isSelected,
-                                              onChanged: (val) {
+                            : Column(
+                                children: [
+                                  Expanded(
+                                    child: SingleChildScrollView(
+                                      scrollDirection: Axis.vertical,
+                                      child: SizedBox(
+                                        width: double.infinity,
+                                        child: DataTable(
+                                          showCheckboxColumn: false,
+                                          headingRowColor: WidgetStateProperty.all(const Color(0xFFF1F5F9)),
+                                          dataRowMinHeight: 48,
+                                          dataRowMaxHeight: 48,
+                                          columns: [
+                                            DataColumn(
+                                              label: Checkbox(
+                                                value: isAllSelected,
+                                                onChanged: (val) {
+                                                  setState(() {
+                                                    if (val == true) {
+                                                      _selectedBarcodes = _displayedItems.map((e) => e.barcode).toSet();
+                                                    } else {
+                                                      _selectedBarcodes.clear();
+                                                    }
+                                                  });
+                                                },
+                                              ),
+                                            ),
+                                            const DataColumn(label: Text('Sl. No.', style: TextStyle(fontWeight: FontWeight.bold))),
+                                            const DataColumn(label: Text('Barcode', style: TextStyle(fontWeight: FontWeight.bold))),
+                                            const DataColumn(label: Text('Item Name', style: TextStyle(fontWeight: FontWeight.bold))),
+                                            const DataColumn(label: Text('Category', style: TextStyle(fontWeight: FontWeight.bold))),
+                                            const DataColumn(label: Text('Purity', style: TextStyle(fontWeight: FontWeight.bold))),
+                                            const DataColumn(label: Text('Weight (g)', style: TextStyle(fontWeight: FontWeight.bold))),
+                                            const DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
+                                          ],
+                                          rows: _displayedItems.map((item) {
+                                            final isSelected = _selectedBarcodes.contains(item.barcode);
+                                            final numStr = item.barcode.replaceAll(RegExp(r'[^0-9]'), '');
+                                            final slNo = int.tryParse(numStr) ?? item.id ?? 0;
+                                            return DataRow(
+                                              selected: isSelected,
+                                              onSelectChanged: (selected) {
                                                 setState(() {
-                                                  if (val == true) {
+                                                  if (selected == true) {
                                                     _selectedBarcodes.add(item.barcode);
                                                   } else {
                                                     _selectedBarcodes.remove(item.barcode);
                                                   }
                                                 });
                                               },
-                                            ),
-                                          ),
-                                          DataCell(
-                                            Text(
-                                              '$slNo',
-                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                            ),
-                                          ),
-                                          DataCell(
-                                            Tooltip(
-                                              message: 'Click to view barcode & QR code',
-                                              child: InkWell(
-                                                onTap: () => _showBarcodeDetailsDialog(item),
-                                                child: Row(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    const Icon(Icons.qr_code, size: 16, color: Color(0xFF0F172A)),
-                                                    const SizedBox(width: 6),
-                                                    Text(
-                                                      item.barcode,
-                                                      style: const TextStyle(
-                                                        fontFamily: 'monospace',
-                                                        fontWeight: FontWeight.bold,
-                                                        fontSize: 13,
+                                              cells: [
+                                                DataCell(
+                                                  Checkbox(
+                                                    value: isSelected,
+                                                    onChanged: (val) {
+                                                      setState(() {
+                                                        if (val == true) {
+                                                          _selectedBarcodes.add(item.barcode);
+                                                        } else {
+                                                          _selectedBarcodes.remove(item.barcode);
+                                                        }
+                                                      });
+                                                    },
+                                                  ),
+                                                ),
+                                                DataCell(
+                                                  Text(
+                                                    '$slNo',
+                                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                                  ),
+                                                ),
+                                                DataCell(
+                                                  Tooltip(
+                                                    message: 'Click to view barcode & QR code',
+                                                    child: InkWell(
+                                                      onTap: () => _showBarcodeDetailsDialog(item),
+                                                      child: Row(
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          const Icon(Icons.qr_code, size: 16, color: Color(0xFF0F172A)),
+                                                          const SizedBox(width: 6),
+                                                          Text(
+                                                            item.barcode,
+                                                            style: const TextStyle(
+                                                              fontFamily: 'monospace',
+                                                              fontWeight: FontWeight.bold,
+                                                              fontSize: 13,
+                                                            ),
+                                                          ),
+                                                        ],
                                                       ),
                                                     ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                          DataCell(Text(item.itemName)),
-                                          DataCell(Text(item.category)),
-                                          DataCell(Text(item.purity)),
-                                          DataCell(Text(item.weight.toStringAsFixed(3))),
-                                          DataCell(
-                                            Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                IconButton(
-                                                  icon: const Icon(Icons.visibility, size: 18, color: Color(0xFF0F172A)),
-                                                  tooltip: 'View Barcode Details',
-                                                  onPressed: () => _showBarcodeDetailsDialog(item),
-                                                ),
-                                                OutlinedButton(
-                                                  style: OutlinedButton.styleFrom(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                                    minimumSize: Size.zero,
-                                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
                                                   ),
-                                                  onPressed: () => _showEditDialog(item),
-                                                  child: const Text('Edit', style: TextStyle(fontSize: 12)),
                                                 ),
-                                                const SizedBox(width: 6),
-                                                ElevatedButton(
-                                                  style: ElevatedButton.styleFrom(
-                                                    backgroundColor: const Color(0xFF334155),
-                                                    foregroundColor: Colors.white,
-                                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                                    minimumSize: Size.zero,
-                                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                                                DataCell(Text(item.itemName)),
+                                                DataCell(Text(item.category)),
+                                                DataCell(Text(item.purity)),
+                                                DataCell(Text(item.weight.toStringAsFixed(3))),
+                                                DataCell(
+                                                  Row(
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      IconButton(
+                                                        icon: const Icon(Icons.visibility, size: 18, color: Color(0xFF0F172A)),
+                                                        tooltip: 'View Barcode Details',
+                                                        onPressed: () => _showBarcodeDetailsDialog(item),
+                                                      ),
+                                                      OutlinedButton(
+                                                        style: OutlinedButton.styleFrom(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                                          minimumSize: Size.zero,
+                                                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                                                        ),
+                                                        onPressed: () => _showEditDialog(item),
+                                                        child: const Text('Edit', style: TextStyle(fontSize: 12)),
+                                                      ),
+                                                      const SizedBox(width: 6),
+                                                      ElevatedButton(
+                                                        style: ElevatedButton.styleFrom(
+                                                          backgroundColor: const Color(0xFF334155),
+                                                          foregroundColor: Colors.white,
+                                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                                          minimumSize: Size.zero,
+                                                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                                                        ),
+                                                        onPressed: () => _reprintLabel(item),
+                                                        child: const Text('Reprint', style: TextStyle(fontSize: 12)),
+                                                      ),
+                                                      const SizedBox(width: 6),
+                                                      IconButton(
+                                                        icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                                                        tooltip: 'Delete Item',
+                                                        onPressed: () => _deleteItem(item),
+                                                      ),
+                                                    ],
                                                   ),
-                                                  onPressed: () => _reprintLabel(item),
-                                                  child: const Text('Reprint', style: TextStyle(fontSize: 12)),
-                                                ),
-                                                const SizedBox(width: 6),
-                                                IconButton(
-                                                  icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
-                                                  tooltip: 'Delete Item',
-                                                  onPressed: () => _deleteItem(item),
                                                 ),
                                               ],
-                                            ),
-                                          ),
-                                        ],
-                                      );
-                                    }).toList(),
+                                            );
+                                          }).toList(),
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                ),
+                                  // ── Pagination navigation bar ──────────────────────────────
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFFF1F5F9),
+                                      border: Border(top: BorderSide(color: Color(0xFFCBD5E1))),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(Icons.first_page),
+                                          tooltip: 'First Page',
+                                          onPressed: _currentPage > 0 ? () => _loadPage(page: 0) : null,
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.chevron_left),
+                                          tooltip: 'Previous Page',
+                                          onPressed: _currentPage > 0 ? () => _loadPage(page: _currentPage - 1) : null,
+                                        ),
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                                          child: Text(
+                                            'Page ${_currentPage + 1} of ${(_totalCount / _pageSize).ceil().clamp(1, 999999)}  '
+                                            '(${_currentPage * _pageSize + 1}–${_currentPage * _pageSize + _displayedItems.length} of $_totalCount)',
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                          ),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.chevron_right),
+                                          tooltip: 'Next Page',
+                                          onPressed: (_currentPage + 1) * _pageSize < _totalCount
+                                              ? () => _loadPage(page: _currentPage + 1)
+                                              : null,
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.last_page),
+                                          tooltip: 'Last Page',
+                                          onPressed: (_currentPage + 1) * _pageSize < _totalCount
+                                              ? () => _loadPage(page: (_totalCount / _pageSize).ceil() - 1)
+                                              : null,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
                   ),
                 ],
@@ -1767,3 +1884,4 @@ class _WindowsInventoryAppState extends State<WindowsInventoryApp> {
     );
   }
 }
+
