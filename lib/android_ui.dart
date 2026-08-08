@@ -14,7 +14,6 @@ import 'package:http/http.dart' as http;
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:printing/printing.dart';
-import 'package:pdf/pdf.dart';
 import 'db.dart';
 import 'printer.dart';
 
@@ -995,11 +994,6 @@ class _AndroidHandPOSAppState extends State<AndroidHandPOSApp> {
                         await Printing.layoutPdf(
                           onLayout: (format) async => pdfBytes,
                           name: 'JewelPOS_DailyReport_$selectedDate',
-                          format: const PdfPageFormat(
-                            58 * PdfPageFormat.mm,
-                            200 * PdfPageFormat.mm,
-                            marginAll: 2 * PdfPageFormat.mm,
-                          ),
                         );
                       },
                       icon: const Icon(Icons.print, size: 16),

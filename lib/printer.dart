@@ -130,12 +130,6 @@ class TSPLPrinter {
       debugPrint('Error loading jewel_logo.png for PDF receipt: $e');
     }
 
-    final pageFormat = PdfPageFormat(
-      58 * PdfPageFormat.mm,
-      200 * PdfPageFormat.mm,
-      marginAll: 2 * PdfPageFormat.mm,
-    );
-
     // ── Compute summaries ──────────────────────────────────────────
     int totalQty = 0;
     double totalWeight = 0.0;
@@ -175,6 +169,19 @@ class TSPLPrinter {
       weightByCatCarat[ccKey] = (weightByCatCarat[ccKey] ?? 0.0) + rowWt;
     }
 
+    // Dynamic height calculation in mm to support long receipts without multi-page truncation
+    final double calculatedHeightMm = 120.0 +
+        (items.length * 5.0) +
+        (weightByItemCatCarat.length * 9.0) +
+        (weightByCatCarat.length * 5.5);
+    final double pageHeightMm = calculatedHeightMm < 150.0 ? 150.0 : calculatedHeightMm;
+
+    final pageFormat = PdfPageFormat(
+      58 * PdfPageFormat.mm,
+      pageHeightMm * PdfPageFormat.mm,
+      marginAll: 2 * PdfPageFormat.mm,
+    );
+
     const String dashes = '- - - - - - - - - - - - - - - - - - - - - - -';
     const String equals = '================================';
 
@@ -186,173 +193,174 @@ class TSPLPrinter {
     };
 
     pdf.addPage(
-      pw.MultiPage(
+      pw.Page(
         pageFormat: pageFormat,
         build: (pw.Context context) {
-          return [
-            // ── HEADER ─────────────────────────────────────────────────
-            if (logoImage != null)
-              pw.Center(child: pw.Image(logoImage, width: 80)),
-            pw.SizedBox(height: 2),
-            pw.Center(
-              child: pw.Text('JEWEL POS',
-                  style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
-            ),
-            pw.Center(
-              child: pw.Text(equals, style: const pw.TextStyle(fontSize: 7.5)),
-            ),
-            pw.SizedBox(height: 3),
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              // ── HEADER ─────────────────────────────────────────────────
+              if (logoImage != null)
+                pw.Center(child: pw.Image(logoImage, width: 80)),
+              pw.SizedBox(height: 2),
+              pw.Center(
+                child: pw.Text('JEWEL POS',
+                    style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
+              ),
+              pw.Center(
+                child: pw.Text(equals, style: const pw.TextStyle(fontSize: 7.5)),
+              ),
+              pw.SizedBox(height: 3),
 
-            // ── ITEMS TABLE HEADER ──────────────────────────────────────
-            pw.Table(
-              columnWidths: colWidths,
-              children: [
-                pw.TableRow(children: [
-                  pw.Text('Item Name',
-                      style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('Qty',
-                      style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold),
-                      textAlign: pw.TextAlign.center),
-                  pw.Text('Carat',
-                      style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold),
-                      textAlign: pw.TextAlign.center),
-                  pw.Text('Weight',
-                      style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold),
-                      textAlign: pw.TextAlign.right),
-                ]),
-              ],
-            ),
-            pw.Text(dashes, style: const pw.TextStyle(fontSize: 6)),
-            pw.SizedBox(height: 1),
-
-            // ── ITEMS TABLE ROWS ────────────────────────────────────────
-            pw.Table(
-              columnWidths: colWidths,
-              children: items.map((item) {
-                final name = (item['itemName'] ?? item['item_name'] ?? '').toString();
-                final qty = (item['quantity'] as num?)?.toInt() ?? (item['qty'] as num?)?.toInt() ?? 1;
-                final purity = (item['purity'] ?? item['carat'] ?? '').toString();
-                final wt = (item['weight'] as num?)?.toDouble() ?? 0.0;
-                final rowWt = wt * qty;
-                return pw.TableRow(children: [
-                  pw.Padding(
-                    padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
-                    child: pw.Text(name,
-                        style: const pw.TextStyle(fontSize: 7),
-                        maxLines: 1,
-                        overflow: pw.TextOverflow.clip),
-                  ),
-                  pw.Padding(
-                    padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
-                    child: pw.Text('$qty',
-                        style: const pw.TextStyle(fontSize: 7),
+              // ── ITEMS TABLE HEADER ──────────────────────────────────────
+              pw.Table(
+                columnWidths: colWidths,
+                children: [
+                  pw.TableRow(children: [
+                    pw.Text('Item Name',
+                        style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold)),
+                    pw.Text('Qty',
+                        style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold),
                         textAlign: pw.TextAlign.center),
-                  ),
-                  pw.Padding(
-                    padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
-                    child: pw.Text(purity.isEmpty ? '-' : purity,
-                        style: const pw.TextStyle(fontSize: 7),
+                    pw.Text('Carat',
+                        style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold),
                         textAlign: pw.TextAlign.center),
-                  ),
-                  pw.Padding(
-                    padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
-                    child: pw.Text('${rowWt.toStringAsFixed(3)}g',
-                        style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
+                    pw.Text('Weight',
+                        style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold),
                         textAlign: pw.TextAlign.right),
-                  ),
-                ]);
-              }).toList(),
-            ),
-            pw.SizedBox(height: 3),
+                  ]),
+                ],
+              ),
+              pw.Text(dashes, style: const pw.TextStyle(fontSize: 6)),
+              pw.SizedBox(height: 1),
 
-            // ── ITEMS COUNT ─────────────────────────────────────────────
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text('Items', style: const pw.TextStyle(fontSize: 8)),
-                pw.Text('$totalQty',
-                    style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-              ],
-            ),
-            pw.SizedBox(height: 3),
-            pw.Text(dashes, style: const pw.TextStyle(fontSize: 6)),
-            pw.SizedBox(height: 3),
+              // ── ITEMS TABLE ROWS ────────────────────────────────────────
+              pw.Table(
+                columnWidths: colWidths,
+                children: items.map((item) {
+                  final name = (item['itemName'] ?? item['item_name'] ?? '').toString();
+                  final qty = (item['quantity'] as num?)?.toInt() ?? (item['qty'] as num?)?.toInt() ?? 1;
+                  final purity = (item['purity'] ?? item['carat'] ?? '').toString();
+                  final wt = (item['weight'] as num?)?.toDouble() ?? 0.0;
+                  final rowWt = wt * qty;
+                  return pw.TableRow(children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+                      child: pw.Text(name,
+                          style: const pw.TextStyle(fontSize: 7),
+                          maxLines: 1,
+                          overflow: pw.TextOverflow.clip),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+                      child: pw.Text('$qty',
+                          style: const pw.TextStyle(fontSize: 7),
+                          textAlign: pw.TextAlign.center),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+                      child: pw.Text(purity.isEmpty ? '-' : purity,
+                          style: const pw.TextStyle(fontSize: 7),
+                          textAlign: pw.TextAlign.center),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+                      child: pw.Text('${rowWt.toStringAsFixed(3)}g',
+                          style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
+                          textAlign: pw.TextAlign.right),
+                    ),
+                  ]);
+                }).toList(),
+              ),
+              pw.SizedBox(height: 3),
 
-            // ── ITEM – CATEGORY – CARAT BREAKDOWN ──────────────────────
-            // Line 1: "ItemName - Category - Carat"  (left-aligned, 7pt)
-            // Line 2: weight right-aligned (bold 7.5pt)
-            ...weightByItemCatCarat.entries.map((e) => pw.Padding(
-                  padding: const pw.EdgeInsets.only(bottom: 2.5),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text(e.key, style: const pw.TextStyle(fontSize: 7)),
-                      pw.Align(
-                        alignment: pw.Alignment.centerRight,
-                        child: pw.Text(
-                          '${e.value.toStringAsFixed(3)} g',
-                          style: pw.TextStyle(
-                              fontSize: 7.5, fontWeight: pw.FontWeight.bold),
+              // ── ITEMS COUNT ─────────────────────────────────────────────
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Items', style: const pw.TextStyle(fontSize: 8)),
+                  pw.Text('$totalQty',
+                      style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                ],
+              ),
+              pw.SizedBox(height: 3),
+              pw.Text(dashes, style: const pw.TextStyle(fontSize: 6)),
+              pw.SizedBox(height: 3),
+
+              // ── ITEM – CATEGORY – CARAT BREAKDOWN ──────────────────────
+              ...weightByItemCatCarat.entries.map((e) => pw.Padding(
+                    padding: const pw.EdgeInsets.only(bottom: 2.5),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(e.key, style: const pw.TextStyle(fontSize: 7)),
+                        pw.Align(
+                          alignment: pw.Alignment.centerRight,
+                          child: pw.Text(
+                            '${e.value.toStringAsFixed(3)} g',
+                            style: pw.TextStyle(
+                                fontSize: 7.5, fontWeight: pw.FontWeight.bold),
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                )),
-            pw.SizedBox(height: 2),
-            pw.Text(dashes, style: const pw.TextStyle(fontSize: 6)),
-            pw.SizedBox(height: 2),
+                      ],
+                    ),
+                  )),
+              pw.SizedBox(height: 2),
+              pw.Text(dashes, style: const pw.TextStyle(fontSize: 6)),
+              pw.SizedBox(height: 2),
 
-            // ── CATEGORY – CARAT SUMMARY ─────────────────────────────────
-            // Black text on thermal white background, bold weights
-            pw.Column(
-              children: weightByCatCarat.entries
-                  .map((e) => pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
-                        child: pw.Row(
-                          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                          children: [
-                            pw.Expanded(
-                              child: pw.Text(e.key,
-                                  style: const pw.TextStyle(fontSize: 7.5)),
-                            ),
-                            pw.SizedBox(width: 4),
-                            pw.Text('${e.value.toStringAsFixed(3)}g',
-                                style: pw.TextStyle(
-                                    fontSize: 7.5,
-                                    fontWeight: pw.FontWeight.bold)),
-                          ],
-                        ),
-                      ))
-                  .toList(),
-            ),
-            pw.SizedBox(height: 3),
-            pw.Text(dashes, style: const pw.TextStyle(fontSize: 6)),
-            pw.SizedBox(height: 3),
+              // ── CATEGORY – CARAT SUMMARY ─────────────────────────────────
+              pw.Column(
+                children: weightByCatCarat.entries
+                    .map((e) => pw.Padding(
+                          padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+                          child: pw.Row(
+                            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                            children: [
+                              pw.Expanded(
+                                child: pw.Text(e.key,
+                                    style: const pw.TextStyle(fontSize: 7.5)),
+                              ),
+                              pw.SizedBox(width: 4),
+                              pw.Text('${e.value.toStringAsFixed(3)}g',
+                                  style: pw.TextStyle(
+                                      fontSize: 7.5,
+                                      fontWeight: pw.FontWeight.bold)),
+                            ],
+                          ),
+                        ))
+                    .toList(),
+              ),
+              pw.SizedBox(height: 3),
+              pw.Text(dashes, style: const pw.TextStyle(fontSize: 6)),
+              pw.SizedBox(height: 3),
 
-            // ── TOTAL WEIGHT ────────────────────────────────────────────
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text('Total Weight:',
-                    style:
-                        pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                pw.Text('${totalWeight.toStringAsFixed(3)} g',
-                    style:
-                        pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-              ],
-            ),
-            pw.SizedBox(height: 2),
-            pw.Center(
-              child: pw.Text(equals, style: const pw.TextStyle(fontSize: 7.5)),
-            ),
-            pw.SizedBox(height: 4),
+              // ── TOTAL WEIGHT ────────────────────────────────────────────
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Total Weight:',
+                      style:
+                          pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                  pw.Text('${totalWeight.toStringAsFixed(3)} g',
+                      style:
+                          pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                ],
+              ),
+              pw.SizedBox(height: 2),
+              pw.Center(
+                child: pw.Text(equals, style: const pw.TextStyle(fontSize: 7.5)),
+              ),
+              pw.SizedBox(height: 4),
 
-            // ── FOOTER ──────────────────────────────────────────────────
-            pw.Center(
-              child: pw.Text('Thank You',
-                  style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-            ),
-          ];
+              // ── FOOTER ──────────────────────────────────────────────────
+              pw.Center(
+                child: pw.Text('Thank You',
+                    style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+              ),
+              pw.SizedBox(height: 15),
+            ],
+          );
         },
       ),
     );
@@ -373,12 +381,6 @@ class TSPLPrinter {
       debugPrint('Error loading jewel_logo.png for Daily Report PDF: $e');
     }
 
-    final pageFormat = PdfPageFormat(
-      58 * PdfPageFormat.mm,
-      200 * PdfPageFormat.mm,
-      marginAll: 2 * PdfPageFormat.mm,
-    );
-
     int grandTotalItems = 0;
     double grandTotalWeight = 0.0;
     final Map<String, Map<String, dynamic>> terminalStats = {};
@@ -395,84 +397,97 @@ class TSPLPrinter {
       terminalStats[termName]!['weight'] = (terminalStats[termName]!['weight'] as double) + log.totalWeight;
     }
 
+    final double calculatedHeightMm = 110.0 + (logs.length * 5.0) + (terminalStats.length * 6.0);
+    final double pageHeightMm = calculatedHeightMm < 150.0 ? 150.0 : calculatedHeightMm;
+
+    final pageFormat = PdfPageFormat(
+      58 * PdfPageFormat.mm,
+      pageHeightMm * PdfPageFormat.mm,
+      marginAll: 2 * PdfPageFormat.mm,
+    );
+
     pdf.addPage(
-      pw.MultiPage(
+      pw.Page(
         pageFormat: pageFormat,
         build: (pw.Context context) {
-          return [
-            if (logoImage != null)
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              if (logoImage != null)
+                pw.Center(
+                  child: pw.Image(logoImage, width: 100),
+                ),
+              pw.SizedBox(height: 4),
               pw.Center(
-                child: pw.Image(logoImage, width: 100),
+                child: pw.Text('JEWEL POS', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
               ),
-            pw.SizedBox(height: 4),
-            pw.Center(
-              child: pw.Text('JEWEL POS', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
-            ),
-            pw.Center(
-              child: pw.Text('END OF DAY REPORT', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-            ),
-            pw.Center(
-              child: pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
-            ),
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text('Date:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                pw.Text(date, style: const pw.TextStyle(fontSize: 8)),
-              ],
-            ),
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text('Total Receipts:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                pw.Text('${logs.length}', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-              ],
-            ),
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text('Total Items Billed:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                pw.Text('$grandTotalItems', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-              ],
-            ),
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text('Total Net Weight:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                pw.Text('${grandTotalWeight.toStringAsFixed(3)} g', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-              ],
-            ),
-            pw.Center(
-              child: pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
-            ),
-            if (terminalStats.isNotEmpty) ...[
               pw.Center(
-                child: pw.Text('TERMINAL BREAKDOWN', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                child: pw.Text('END OF DAY REPORT', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
               ),
-              pw.Divider(thickness: 0.5),
-              ...terminalStats.entries.map((e) {
-                final tName = e.key;
-                final tCount = e.value['count'];
-                final tWt = (e.value['weight'] as double).toStringAsFixed(3);
-                return pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Expanded(
-                      child: pw.Text('$tName ($tCount receipts)', style: const pw.TextStyle(fontSize: 7.5)),
-                    ),
-                    pw.Text('$tWt g', style: const pw.TextStyle(fontSize: 7.5)),
-                  ],
-                );
-              }),
               pw.Center(
                 child: pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
               ),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Date:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                  pw.Text(date, style: const pw.TextStyle(fontSize: 8)),
+                ],
+              ),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Total Receipts:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                  pw.Text('${logs.length}', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                ],
+              ),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Total Items Billed:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                  pw.Text('$grandTotalItems', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                ],
+              ),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Total Net Weight:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                  pw.Text('${grandTotalWeight.toStringAsFixed(3)} g', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                ],
+              ),
+              pw.Center(
+                child: pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
+              ),
+              if (terminalStats.isNotEmpty) ...[
+                pw.Center(
+                  child: pw.Text('TERMINAL BREAKDOWN', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                ),
+                pw.Divider(thickness: 0.5),
+                ...terminalStats.entries.map((e) {
+                  final tName = e.key;
+                  final tCount = e.value['count'];
+                  final tWt = (e.value['weight'] as double).toStringAsFixed(3);
+                  return pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Expanded(
+                        child: pw.Text('$tName ($tCount receipts)', style: const pw.TextStyle(fontSize: 7.5)),
+                      ),
+                      pw.Text('$tWt g', style: const pw.TextStyle(fontSize: 7.5)),
+                    ],
+                  );
+                }),
+                pw.Center(
+                  child: pw.Text('================================', style: const pw.TextStyle(fontSize: 8)),
+                ),
+              ],
+              pw.SizedBox(height: 4),
+              pw.Center(
+                child: pw.Text('Thank You', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+              ),
+              pw.SizedBox(height: 15),
             ],
-            pw.SizedBox(height: 4),
-            pw.Center(
-              child: pw.Text('Thank You', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-            ),
-          ];
+          );
         },
       ),
     );

@@ -108,8 +108,19 @@ class MainActivity : FlutterActivity() {
                 callback: LayoutResultCallback,
                 extras: Bundle?
             ) {
+                val lines = receiptText.split("\n")
+                var calculatedHeight = 40f
+                if (logoBitmap != null) {
+                    val targetWidth = 100f
+                    val scale = targetWidth / logoBitmap.width.toFloat()
+                    val targetHeight = logoBitmap.height.toFloat() * scale
+                    calculatedHeight += targetHeight + 10f
+                }
+                calculatedHeight += (lines.size * 15f) + 60f
+                val pageHeight = if (calculatedHeight < 600f) 600 else calculatedHeight.toInt()
+
                 pdfDocument = PdfDocument()
-                val pageInfo = PdfDocument.PageInfo.Builder(200, 600, 1).create()
+                val pageInfo = PdfDocument.PageInfo.Builder(200, pageHeight, 1).create()
                 val page = pdfDocument!!.startPage(pageInfo)
 
                 val canvas: Canvas = page.canvas
@@ -131,7 +142,6 @@ class MainActivity : FlutterActivity() {
                     y += targetHeight + 10f
                 }
 
-                val lines = receiptText.split("\n")
                 for (line in lines) {
                     val trimmed = line.trim()
                     if (trimmed == "JEWEL POS" || trimmed.startsWith("===") || trimmed.startsWith("---") || trimmed == "Thank You") {
