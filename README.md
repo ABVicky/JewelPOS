@@ -35,7 +35,7 @@ Both apps are compiled from a **single Flutter codebase** that intelligently swi
 |---|---|
 | **Inventory Registration** | Add jewellery items with name, category (Pure Gold / With Stone / Others), purity (e.g. 22K), and weight in grams |
 | **Auto Barcode Generation** | Each item is assigned a unique sequential barcode in the format `JMT000000001` automatically |
-| **Barcode Label Printing** | Generates 38mm × 25mm PDF labels with Code-128 barcode using the system's native print dialog |
+| **QR Code / Barcode Label Printing** | Generates 38mm × 25mm PDF labels with item details on the left and QR code on the right using the system's native print dialog |
 | **Batch Label Printing** | Select multiple items by checkbox or serial range and print all labels in a single print job |
 | **Inventory Table & Search** | Full-text search across barcode, item name, and category; numeric serial range filter (e.g. `400-600`) |
 | **Edit Items** | Update item name, category, purity, and weight inline via a dialog (barcode is immutable) |
@@ -266,11 +266,11 @@ On first launch, the app will automatically scan the local subnet for an active 
 
 ## 🖨️ Printing
 
-### Barcode Labels (Windows)
+### Labels (Windows)
 
 - **Label Size:** 38mm × 25mm
 - **Format:** PDF via Windows native print dialog
-- **Content:** Item name, category, purity, weight, and Code-128 barcode
+- **Content:** Left side item details (name, category, purity, weight, ID), right side QR code
 
 ### Customer Receipts (Android)
 

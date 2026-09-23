@@ -24,7 +24,10 @@ class TSPLPrinter {
     final pageFormat = PdfPageFormat(
       38 * PdfPageFormat.mm,
       25 * PdfPageFormat.mm,
-      marginAll: 1.5 * PdfPageFormat.mm,
+      marginLeft: 1.8 * PdfPageFormat.mm,
+      marginRight: 2.0 * PdfPageFormat.mm,
+      marginTop: 2.0 * PdfPageFormat.mm,
+      marginBottom: 2.0 * PdfPageFormat.mm,
     );
 
     for (var item in items) {
@@ -32,43 +35,77 @@ class TSPLPrinter {
         pw.Page(
           pageFormat: pageFormat,
           build: (pw.Context context) {
-            return pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            return pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
-                // Row 1: Item Name & Category (Bold & Clear)
-                pw.Text(
-                  '${item.itemName} (${item.category})',
-                  style: pw.TextStyle(
-                    fontSize: 8.5,
-                    fontWeight: pw.FontWeight.bold,
+                // Left side: Item Information
+                pw.Expanded(
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Item Name (Bold)
+                      pw.Text(
+                        item.itemName,
+                        style: pw.TextStyle(
+                          fontSize: 7.5,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: pw.TextOverflow.clip,
+                      ),
+                      // Category
+                      pw.Text(
+                        item.category,
+                        style: pw.TextStyle(
+                          fontSize: 6.5,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: pw.TextOverflow.clip,
+                      ),
+                      // Purity
+                      pw.Text(
+                        'Pur: ${item.purity}',
+                        style: const pw.TextStyle(
+                          fontSize: 6.5,
+                        ),
+                        maxLines: 1,
+                        overflow: pw.TextOverflow.clip,
+                      ),
+                      // Weight
+                      pw.Text(
+                        'Wt: ${item.weight.toStringAsFixed(3)}g',
+                        style: pw.TextStyle(
+                          fontSize: 6.5,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: pw.TextOverflow.clip,
+                      ),
+                      // Barcode / Tag ID (Fits full ID e.g. JMT000000042)
+                      pw.Text(
+                        item.barcode,
+                        style: pw.TextStyle(
+                          fontSize: 5.8,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: pw.TextOverflow.clip,
+                      ),
+                    ],
                   ),
-                  maxLines: 1,
-                  overflow: pw.TextOverflow.clip,
                 ),
-                // Row 2: Purity & Weight (Bold & Clear)
-                pw.Text(
-                  'Pur: ${item.purity}  Wt: ${item.weight.toStringAsFixed(3)} g',
-                  style: pw.TextStyle(
-                    fontSize: 8,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                  maxLines: 1,
-                  overflow: pw.TextOverflow.clip,
-                ),
-                pw.SizedBox(height: 1),
-                // Row 3-4: Code128 Barcode & Barcode ID Text (Bold & Clear)
-                pw.Center(
+                pw.SizedBox(width: 3),
+                // Right side: QR Code with safe quiet zone so it is never clipped
+                pw.Container(
+                  width: 42,
+                  height: 42,
+                  alignment: pw.Alignment.center,
                   child: pw.BarcodeWidget(
-                    barcode: pw.Barcode.code128(),
+                    barcode: pw.Barcode.qrCode(),
                     data: item.barcode,
-                    width: 90,
-                    height: 24,
-                    drawText: true,
-                    textStyle: pw.TextStyle(
-                      fontSize: 7.5,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
+                    drawText: false,
                   ),
                 ),
               ],
@@ -107,7 +144,10 @@ class TSPLPrinter {
         format: PdfPageFormat(
           38 * PdfPageFormat.mm,
           25 * PdfPageFormat.mm,
-          marginAll: 1.5 * PdfPageFormat.mm,
+          marginLeft: 1.8 * PdfPageFormat.mm,
+          marginRight: 2.0 * PdfPageFormat.mm,
+          marginTop: 2.0 * PdfPageFormat.mm,
+          marginBottom: 2.0 * PdfPageFormat.mm,
         ),
       );
       return true;
